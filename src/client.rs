@@ -1,7 +1,7 @@
 use async_std::task;
 use elevator::elevator_client::ElevatorClient;
-use elevator::{Point, ResponseCode, Value, Values};
-use futures::future::try_join_all;
+use elevator::{Id, Point, ResponseCode, Value, Values};
+use futures::future::{try_join, try_join_all};
 use futures::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
 use rand::Rng;
@@ -39,6 +39,7 @@ struct GpioConfig {
 
 #[derive(Deserialize)]
 struct Time {
+    heartbeat_m: u64,
     sleep_max_s: u64,
     sleep_min_s: u64,
 }
@@ -253,14 +254,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         }
     }
+    let mut monitor_futures = vec![gpiomon(&config, lines[0], channel.clone())];
+    let heartbeat_future = heartbeat(&config, channel.clone());
 
-    let mut monitors = vec![gpiomon(&config, lines[0], channel.clone())];
     for l in &lines[1..] {
-        monitors.push(gpiomon(&config, *l, channel.clone()));
+        monitor_futures.push(gpiomon(&config, *l, channel.clone()));
     }
-    try_join_all(monitors).await.unwrap();
+
+    match try_join(try_join_all(monitor_futures), heartbeat_future).await {
+        Ok(_) => eprintln!("All tasks completed successfully"),
+        Err(e) => eprintln!("Some task failed: {e}"),
+    };
 
     Ok(())
+}
+
+async fn heartbeat(config: &Config, channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
+    let mut client = ElevatorClient::new(channel);
+
+    //Create measurement of type Value
+    let id = Id {
+        unit_id: config.uid.to_string(),
+    };
+
+    loop {
+        task::sleep(Duration::from_secs(config.time.heartbeat_m * 60)).await;
+
+        match client.heart_beat(id.clone()).await {
+            Ok(r) => match ResponseCode::from_i32(r.into_inner().rc) {
+                Some(ResponseCode::CarryOn) => continue,
+                Some(ResponseCode::Exit) => break,
+                Some(ResponseCode::SoftwareUpdate) => {
+                    println!("Software update");
+                    match download().await {
+                        Err(_) => {
+                            eprintln!("Download failed. Let's continue as if nothing happened.")
+                        }
+                        Ok(_) => break,
+                    }
+                }
+                _ => panic!("Unrecognized response code"),
+            },
+            Err(e) => eprintln!("The server could not receive the heart beat. Status: {e}"),
+        };
+    }
+    Ok(ResponseCode::Exit)
 }
 
 async fn read_all(gpio: &GpioConfig) -> Vec<u8> {
