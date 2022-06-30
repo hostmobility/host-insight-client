@@ -151,7 +151,7 @@ async fn gpiomon(
                         Err(_) => {
                             eprintln!("Download failed. Let's continue as if nothing happened.")
                         }
-                        Ok(_) => break,
+                        Ok(_) => std::process::exit(0),
                     }
                 }
                 _ => panic!("Unrecognized response code {r}"),
@@ -224,7 +224,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Some(ResponseCode::Exit) => return Ok(()),
                     Some(ResponseCode::SoftwareUpdate) => {
                         println!("Software update");
-                        break;
+                        match download().await {
+                            Err(_) => {
+                                eprintln!("Download failed. Let's continue as if nothing happened.")
+                            }
+                            Ok(_) => std::process::exit(0),
+                        }
                     }
                     _ => panic!("Unrecognized response code {r}"),
                 },
@@ -290,7 +295,7 @@ async fn heartbeat(config: &Config, channel: Channel) -> Result<ResponseCode, Bo
                         Err(_) => {
                             eprintln!("Download failed. Let's continue as if nothing happened.")
                         }
-                        Ok(_) => break,
+                        Ok(_) => std::process::exit(0),
                     }
                 }
                 _ => panic!("Unrecognized response code"),
