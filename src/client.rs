@@ -134,13 +134,10 @@ async fn gpiomon(
         .await
         {
             Err(e) => {
-                if s <= config.time.sleep_max_s {
-                    eprintln!("Sleeping for {s}.{ms} s");
-                    task::sleep(Duration::from_millis(s * 1000 + ms)).await;
-                    s = std::cmp::min(s * 2, config.time.sleep_max_s);
-                } else {
-                    return Err(e);
-                }
+                eprintln!("Error: {e}");
+                eprintln!("Sleeping for {s}.{ms} s");
+                task::sleep(Duration::from_millis(s * 1000 + ms)).await;
+                s = std::cmp::min(s * 2, config.time.sleep_max_s);
             }
             Ok(r) => match ResponseCode::from_i32(r) {
                 Some(ResponseCode::CarryOn) => s = config.time.sleep_min_s,
@@ -209,15 +206,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await
             {
                 Err(e) => {
-                    if s <= config.time.sleep_max_s {
-                        eprintln!("Error: {e}");
-                        eprintln!("Sleeping for {s}.{ms} s");
-                        task::sleep(Duration::from_millis(s * 1000 + ms)).await;
-                        s = std::cmp::min(s * 2, config.time.sleep_max_s);
-                    } else {
-                        eprintln!("Error: {e}");
-                        return Err(e);
-                    }
+                    eprintln!("Error: {e}");
+                    eprintln!("Sleeping for {s}.{ms} s");
+                    task::sleep(Duration::from_millis(s * 1000 + ms)).await;
+                    s = std::cmp::min(s * 2, config.time.sleep_max_s);
                 }
                 Ok(r) => match ResponseCode::from_i32(r) {
                     Some(ResponseCode::CarryOn) => s = config.time.sleep_min_s,
@@ -247,15 +239,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Send GPS position
         match send_point(config.uid, channel.clone(), &config).await {
             Err(e) => {
-                if s <= config.time.sleep_max_s {
-                    eprintln!("Error: {e}");
-                    eprintln!("Sleeping for {s}.{ms} s");
-                    task::sleep(Duration::from_millis(s * 1000 + ms)).await;
-                    s = std::cmp::min(s * 2, config.time.sleep_max_s);
-                } else {
-                    eprintln!("Error: {e}");
-                    return Err(e);
-                }
+                eprintln!("Error: {e}");
+                eprintln!("Sleeping for {s}.{ms} s");
+                task::sleep(Duration::from_millis(s * 1000 + ms)).await;
+                s = std::cmp::min(s * 2, config.time.sleep_max_s);
             }
             Ok(r) => match ResponseCode::from_i32(r) {
                 Some(ResponseCode::CarryOn) => break,
