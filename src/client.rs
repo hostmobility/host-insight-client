@@ -231,6 +231,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Ok(_) => std::process::exit(0),
                         }
                     }
+                    Some(ResponseCode::ConfigUpdate) => {
+                        println!("Config update");
+                        match download(ResponseCode::ConfigUpdate).await {
+                            Err(_) => {
+                                eprintln!("Download failed. Let's continue as if nothing happened.")
+                            }
+                            Ok(_) => std::process::exit(0),
+                        }
+                    }
                     _ => panic!("Unrecognized response code {r}"),
                 },
             }
@@ -253,8 +262,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(ResponseCode::Exit) => return Ok(()),
                 Some(ResponseCode::SoftwareUpdate) => {
                     println!("Software update");
-                    break;
+                    match download(ResponseCode::ConfigUpdate).await {
+                        Err(_) => {
+                            eprintln!("Download failed. Let's continue as if nothing happened.")
+                        }
+                        Ok(_) => std::process::exit(0),
+                    }
                 }
+                Some(ResponseCode::ConfigUpdate) => {
+                    println!("Config update");
+                    match download(ResponseCode::ConfigUpdate).await {
+                        Err(_) => {
+                            eprintln!("Download failed. Let's continue as if nothing happened.")
+                        }
+                        Ok(_) => std::process::exit(0),
+                    }
+                }
+
                 _ => panic!("Unrecognized response code {r}"),
             },
         }
@@ -298,6 +322,16 @@ async fn heartbeat(config: &Config, channel: Channel) -> Result<ResponseCode, Bo
                         Ok(_) => std::process::exit(0),
                     }
                 }
+                Some(ResponseCode::ConfigUpdate) => {
+                    println!("Config update");
+                    match download(ResponseCode::ConfigUpdate).await {
+                        Err(_) => {
+                            eprintln!("Download failed. Let's continue as if nothing happened.")
+                        }
+                        Ok(_) => std::process::exit(0),
+                    }
+                }
+
                 _ => panic!("Unrecognized response code"),
             },
             Err(e) => eprintln!("The server could not receive the heart beat. Status: {e}"),
@@ -327,7 +361,19 @@ async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
             .arg("https://hm.fps-gbg.net/files/ada/client")
             .spawn()
             .ok()
-            .expect("Failed to execute wget.");
+            .expect("Failed to execute curl.");
+        match process.wait() {
+            Ok(_) => println!("Download completed"),
+            Err(e) => return Err(e),
+        }
+    } else if code == ResponseCode::ConfigUpdate {
+        let mut process = Command::new("curl")
+            .arg("-o")
+            .arg("conf.toml-new")
+            .arg("https://hm.fps-gbg.net/files/ada/conf.toml")
+            .spawn()
+            .ok()
+            .expect("Failed to execute curl.");
         match process.wait() {
             Ok(_) => println!("Download completed"),
             Err(e) => return Err(e),
