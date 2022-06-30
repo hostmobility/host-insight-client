@@ -141,7 +141,7 @@ async fn gpiomon(
             }
             Ok(r) => match ResponseCode::from_i32(r) {
                 Some(ResponseCode::CarryOn) => s = config.time.sleep_min_s,
-                Some(ResponseCode::Exit) => break,
+                Some(ResponseCode::Exit) => std::process::exit(0),
                 Some(ResponseCode::SoftwareUpdate) => {
                     println!("Software update");
                     match download(ResponseCode::SoftwareUpdate).await {
@@ -213,7 +213,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Ok(r) => match ResponseCode::from_i32(r) {
                     Some(ResponseCode::CarryOn) => s = config.time.sleep_min_s,
-                    Some(ResponseCode::Exit) => return Ok(()),
+                    Some(ResponseCode::Exit) => std::process::exit(0),
                     Some(ResponseCode::SoftwareUpdate) => {
                         println!("Software update");
                         match download(ResponseCode::SoftwareUpdate).await {
@@ -246,7 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Ok(r) => match ResponseCode::from_i32(r) {
                 Some(ResponseCode::CarryOn) => break,
-                Some(ResponseCode::Exit) => return Ok(()),
+                Some(ResponseCode::Exit) => std::process::exit(0),
                 Some(ResponseCode::SoftwareUpdate) => {
                     println!("Software update");
                     match download(ResponseCode::ConfigUpdate).await {
@@ -299,7 +299,7 @@ async fn heartbeat(config: &Config, channel: Channel) -> Result<ResponseCode, Bo
         match client.heart_beat(id.clone()).await {
             Ok(r) => match ResponseCode::from_i32(r.into_inner().rc) {
                 Some(ResponseCode::CarryOn) => continue,
-                Some(ResponseCode::Exit) => break,
+                Some(ResponseCode::Exit) => std::process::exit(0),
                 Some(ResponseCode::SoftwareUpdate) => {
                     println!("Software update");
                     match download(ResponseCode::SoftwareUpdate).await {
