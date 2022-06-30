@@ -147,7 +147,7 @@ async fn gpiomon(
                 Some(ResponseCode::Exit) => break,
                 Some(ResponseCode::SoftwareUpdate) => {
                     println!("Software update");
-                    match download().await {
+                    match download(ResponseCode::SoftwareUpdate).await {
                         Err(_) => {
                             eprintln!("Download failed. Let's continue as if nothing happened.")
                         }
@@ -224,7 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Some(ResponseCode::Exit) => return Ok(()),
                     Some(ResponseCode::SoftwareUpdate) => {
                         println!("Software update");
-                        match download().await {
+                        match download(ResponseCode::SoftwareUpdate).await {
                             Err(_) => {
                                 eprintln!("Download failed. Let's continue as if nothing happened.")
                             }
@@ -291,7 +291,7 @@ async fn heartbeat(config: &Config, channel: Channel) -> Result<ResponseCode, Bo
                 Some(ResponseCode::Exit) => break,
                 Some(ResponseCode::SoftwareUpdate) => {
                     println!("Software update");
-                    match download().await {
+                    match download(ResponseCode::SoftwareUpdate).await {
                         Err(_) => {
                             eprintln!("Download failed. Let's continue as if nothing happened.")
                         }
@@ -319,17 +319,20 @@ async fn read_all(gpio: &GpioConfig) -> Vec<u8> {
     values
 }
 
-async fn download() -> Result<(), std::io::Error> {
-    let mut the_process = Command::new("curl")
-        .arg("-O")
-        .arg("https://hm.fps-gbg.net/files/ada/ada-client-new")
-        .spawn()
-        .ok()
-        .expect("Failed to execute wget.");
-    // Do things with `the_process`
-    match the_process.wait() {
-        Ok(_) => println!("Download completed"),
-        Err(e) => return Err(e),
+async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
+    if code == ResponseCode::SoftwareUpdate {
+        let mut process = Command::new("curl")
+            .arg("-o")
+            .arg("client-new")
+            .arg("https://hm.fps-gbg.net/files/ada/client")
+            .spawn()
+            .ok()
+            .expect("Failed to execute wget.");
+        match process.wait() {
+            Ok(_) => println!("Download completed"),
+            Err(e) => return Err(e),
+        }
     }
+
     Ok(())
 }
