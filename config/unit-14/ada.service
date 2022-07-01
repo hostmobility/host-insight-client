@@ -1,0 +1,11 @@
+[Unit]
+Description=Run ada-launcher
+
+[Service]
+WorkingDirectory=/home/root
+ExecStart=/home/root/ada-launch.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
