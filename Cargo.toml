@@ -7,7 +7,7 @@ edition = "2021"
 
 [[bin]] # Bin to run the digital gRPC client
 name = "client"
-path = "src/client.rs"
+path = "src/main.rs"
 
 [dependencies]
 tonic = { version = "0.7", features = ["tls"] }
