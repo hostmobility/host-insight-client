@@ -1,8 +1,9 @@
 use async_std::task;
 use elevator::elevator_client::ElevatorClient;
 use elevator::{Id, Point, ResponseCode, Value, Values};
-use futures::future::{try_join, try_join_all};
+use futures::future::{try_join3, try_join_all};
 use futures::stream::StreamExt;
+//use futures_util::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
 use rand::Rng;
 use serde_derive::Deserialize;
@@ -10,6 +11,7 @@ use std::error::Error;
 use std::fs;
 use std::process::Command;
 use std::time::Duration;
+use tokio_socketcan::CANSocket;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 
 pub mod elevator {
@@ -19,6 +21,7 @@ pub mod elevator {
 #[derive(Deserialize)]
 struct Config {
     uid: u32,
+    can: CanConfig,
     gpio: GpioConfig,
     server: ServerConfig,
     time: Time,
@@ -35,6 +38,12 @@ struct ServerConfig {
 struct GpioConfig {
     chip: Option<String>,
     lines: Option<Vec<u32>>,
+}
+
+#[derive(Deserialize)]
+struct CanConfig {
+    bitrate: u32,
+    ports: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -106,6 +115,22 @@ async fn send_point(
     Ok(response.into_inner().rc)
 }
 
+async fn canmon(config: &Config, port: &str) -> Result<ResponseCode, Box<dyn Error>> {
+    let mut socket_rx = CANSocket::open(port)?;
+    let bitrate = config.can.bitrate;
+    eprintln!("Reading on {port}");
+    eprintln!("Default bitrate: {bitrate}");
+
+    // Add retries with backoff
+    // let mut s = config.time.sleep_min_s;
+    // let ms = rand::thread_rng().gen_range(0..=500);
+
+    while let Some(frame) = socket_rx.next().await {
+        eprintln!("{:#?}", frame);
+    }
+    Ok(ResponseCode::Exit)
+}
+
 async fn gpiomon(
     config: &Config,
     gpio_n: u32,
@@ -167,6 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to server
     //let server: ServerConfig = config.server;
     let lines = config.gpio.lines.as_ref().unwrap();
+    let can_ports = config.can.ports.as_ref().unwrap();
     let pem = tokio::fs::read("/etc/ssl/certs/ca-certificates.crt").await?;
     let ca = Certificate::from_pem(pem);
 
@@ -270,14 +296,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         }
     }
-    let mut monitor_futures = vec![gpiomon(&config, lines[0], channel.clone())];
+    let mut gpiomon_futures = vec![gpiomon(&config, lines[0], channel.clone())];
+    let mut canmon_futures = vec![canmon(&config, &can_ports[0])];
     let heartbeat_future = heartbeat(&config, channel.clone());
 
     for l in &lines[1..] {
-        monitor_futures.push(gpiomon(&config, *l, channel.clone()));
+        gpiomon_futures.push(gpiomon(&config, *l, channel.clone()));
     }
 
-    match try_join(try_join_all(monitor_futures), heartbeat_future).await {
+    for l in &can_ports[1..] {
+        canmon_futures.push(canmon(&config, l));
+    }
+
+    //let futures = vec![gpiomon_futures, canmon_futures, heartbeat_future];
+
+    match try_join3(
+        try_join_all(gpiomon_futures),
+        try_join_all(canmon_futures),
+        heartbeat_future,
+    )
+    .await
+    {
         Ok(_) => eprintln!("All tasks completed successfully"),
         Err(e) => eprintln!("Some task failed: {e}"),
     };
