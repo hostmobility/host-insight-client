@@ -1,9 +1,8 @@
 use async_std::task;
 use elevator::elevator_client::ElevatorClient;
 use elevator::{Id, Point, ResponseCode, Value, Values};
-use futures::future::{try_join3, try_join_all};
+use futures::future::{try_join, try_join3, try_join_all};
 use futures::stream::StreamExt;
-//use futures_util::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
 use rand::Rng;
 use serde_derive::Deserialize;
@@ -21,8 +20,8 @@ pub mod elevator {
 #[derive(Deserialize)]
 struct Config {
     uid: u32,
-    can: CanConfig,
-    gpio: GpioConfig,
+    can: Option<CanConfig>,
+    gpio: Option<GpioConfig>,
     server: ServerConfig,
     time: Time,
     position: GpsData,
@@ -34,15 +33,15 @@ struct ServerConfig {
     port: u16,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct GpioConfig {
     chip: Option<String>,
     lines: Option<Vec<u32>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct CanConfig {
-    bitrate: u32,
+    bitrate: Option<u32>,
     ports: Option<Vec<String>>,
 }
 
@@ -117,17 +116,18 @@ async fn send_point(
 
 async fn canmon(config: &Config, port: &str) -> Result<ResponseCode, Box<dyn Error>> {
     let mut socket_rx = CANSocket::open(port)?;
-    let bitrate = config.can.bitrate;
-    eprintln!("Reading on {port}");
-    eprintln!("Default bitrate: {bitrate}");
+    eprintln!("Start reading on {port}");
+    if let Some(bitrate) = config.can.as_ref().unwrap().bitrate {
+        eprintln!("Default bitrate: {bitrate}");
+    }
+    while let Some(frame) = socket_rx.next().await {
+        eprintln!("{:#?}", frame);
+    }
 
     // Add retries with backoff
     // let mut s = config.time.sleep_min_s;
     // let ms = rand::thread_rng().gen_range(0..=500);
 
-    while let Some(frame) = socket_rx.next().await {
-        eprintln!("{:#?}", frame);
-    }
     Ok(ResponseCode::Exit)
 }
 
@@ -137,7 +137,7 @@ async fn gpiomon(
     //gpio_values: &HashMap<String, bool>,
     channel: Channel,
 ) -> Result<ResponseCode, Box<dyn Error>> {
-    let mut chip = Chip::new(config.gpio.chip.clone().unwrap())?;
+    let mut chip = Chip::new(config.gpio.clone().unwrap().chip.unwrap())?;
     let line = chip.get_line(gpio_n)?;
     let mut events = AsyncLineEventHandle::new(line.events(
         LineRequestFlags::INPUT,
@@ -191,8 +191,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Connect to server
     //let server: ServerConfig = config.server;
-    let lines = config.gpio.lines.as_ref().unwrap();
-    let can_ports = config.can.ports.as_ref().unwrap();
     let pem = tokio::fs::read("/etc/ssl/certs/ca-certificates.crt").await?;
     let ca = Certificate::from_pem(pem);
 
@@ -213,53 +211,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let channel = endpoint.connect_lazy();
 
-    // Get initial values
-    let initial_vals = read_all(&config.gpio).await;
-
     // Add retries with backoff
     let mut s = config.time.sleep_min_s;
     let ms = rand::thread_rng().gen_range(0..=500);
 
+    // Get initial GPIO values
+    let initial_gpio_vals: Option<Vec<u8>> = read_all(&config).await;
+
     // Send initial values
     loop {
-        for (i, elem) in initial_vals.iter().enumerate() {
-            match send_value(
-                config.uid,
-                channel.clone(),
-                &format!("Digital {}", i),
-                *elem != 0,
-            )
-            .await
-            {
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    eprintln!("Sleeping for {s}.{ms} s");
-                    task::sleep(Duration::from_millis(s * 1000 + ms)).await;
-                    s = std::cmp::min(s * 2, config.time.sleep_max_s);
+        if initial_gpio_vals.is_some() {
+            for (i, elem) in initial_gpio_vals.clone().unwrap().iter().enumerate() {
+                match send_value(
+                    config.uid,
+                    channel.clone(),
+                    &format!("Digital {}", i),
+                    *elem != 0,
+                )
+                .await
+                {
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        eprintln!("Sleeping for {s}.{ms} s");
+                        task::sleep(Duration::from_millis(s * 1000 + ms)).await;
+                        s = std::cmp::min(s * 2, config.time.sleep_max_s);
+                    }
+                    Ok(r) => {
+                        match ResponseCode::from_i32(r) {
+                            Some(ResponseCode::CarryOn) => s = config.time.sleep_min_s,
+                            Some(ResponseCode::Exit) => std::process::exit(0),
+                            Some(ResponseCode::SoftwareUpdate) => {
+                                println!("Software update");
+                                match download(ResponseCode::SoftwareUpdate).await {
+                                    Err(_) => {
+                                        eprintln!("Download failed. Let's continue as if nothing happened.")
+                                    }
+                                    Ok(_) => std::process::exit(0),
+                                }
+                            }
+                            Some(ResponseCode::ConfigUpdate) => {
+                                println!("Config update");
+                                match download(ResponseCode::ConfigUpdate).await {
+                                    Err(_) => {
+                                        eprintln!("Download failed. Let's continue as if nothing happened.")
+                                    }
+                                    Ok(_) => std::process::exit(0),
+                                }
+                            }
+                            _ => panic!("Unrecognized response code {r}"),
+                        }
+                    }
                 }
-                Ok(r) => match ResponseCode::from_i32(r) {
-                    Some(ResponseCode::CarryOn) => s = config.time.sleep_min_s,
-                    Some(ResponseCode::Exit) => std::process::exit(0),
-                    Some(ResponseCode::SoftwareUpdate) => {
-                        println!("Software update");
-                        match download(ResponseCode::SoftwareUpdate).await {
-                            Err(_) => {
-                                eprintln!("Download failed. Let's continue as if nothing happened.")
-                            }
-                            Ok(_) => std::process::exit(0),
-                        }
-                    }
-                    Some(ResponseCode::ConfigUpdate) => {
-                        println!("Config update");
-                        match download(ResponseCode::ConfigUpdate).await {
-                            Err(_) => {
-                                eprintln!("Download failed. Let's continue as if nothing happened.")
-                            }
-                            Ok(_) => std::process::exit(0),
-                        }
-                    }
-                    _ => panic!("Unrecognized response code {r}"),
-                },
             }
         }
         // Send GPS position
@@ -296,30 +298,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         }
     }
-    let mut gpiomon_futures = vec![gpiomon(&config, lines[0], channel.clone())];
-    let mut canmon_futures = vec![canmon(&config, &can_ports[0])];
     let heartbeat_future = heartbeat(&config, channel.clone());
 
-    for l in &lines[1..] {
-        gpiomon_futures.push(gpiomon(&config, *l, channel.clone()));
+    // TODO: refactor this ugly part
+    if initial_gpio_vals.is_some() && config.can.is_some() {
+        let lines = config.gpio.clone().unwrap().lines.unwrap();
+        let mut gpiomon_futures = vec![gpiomon(&config, lines[0], channel.clone())];
+        for l in &lines[1..] {
+            gpiomon_futures.push(gpiomon(&config, *l, channel.clone()));
+        }
+
+        let can_ports = config.can.clone().unwrap().ports.unwrap();
+        let mut canmon_futures = vec![canmon(&config, &can_ports[0])];
+        for l in &can_ports[1..] {
+            canmon_futures.push(canmon(&config, l));
+        }
+        match try_join3(
+            try_join_all(gpiomon_futures),
+            try_join_all(canmon_futures),
+            heartbeat_future,
+        )
+        .await
+        {
+            Ok(_) => eprintln!("All tasks completed successfully"),
+            Err(e) => eprintln!("Some task failed: {e}"),
+        };
+    } else if config.can.is_some() {
+        let can_ports = config.can.clone().unwrap().ports.unwrap();
+        let mut canmon_futures = vec![canmon(&config, &can_ports[0])];
+        for l in &can_ports[1..] {
+            canmon_futures.push(canmon(&config, l));
+        }
+        match try_join(try_join_all(canmon_futures), heartbeat_future).await {
+            Ok(_) => eprintln!("All tasks completed successfully"),
+            Err(e) => eprintln!("Some task failed: {e}"),
+        };
+    } else if initial_gpio_vals.is_some() {
+        let lines = config.gpio.clone().unwrap().lines.unwrap();
+        let mut gpiomon_futures = vec![gpiomon(&config, lines[0], channel.clone())];
+        for l in &lines[1..] {
+            gpiomon_futures.push(gpiomon(&config, *l, channel.clone()));
+        }
+
+        match try_join(try_join_all(gpiomon_futures), heartbeat_future).await {
+            Ok(_) => eprintln!("All tasks completed successfully"),
+            Err(e) => eprintln!("Some task failed: {e}"),
+        };
+    } else {
+        eprintln!("Invalid configuration. You need to specify at least one of the following I/Os: gpio, can");
     }
-
-    for l in &can_ports[1..] {
-        canmon_futures.push(canmon(&config, l));
-    }
-
-    //let futures = vec![gpiomon_futures, canmon_futures, heartbeat_future];
-
-    match try_join3(
-        try_join_all(gpiomon_futures),
-        try_join_all(canmon_futures),
-        heartbeat_future,
-    )
-    .await
-    {
-        Ok(_) => eprintln!("All tasks completed successfully"),
-        Err(e) => eprintln!("Some task failed: {e}"),
-    };
 
     Ok(())
 }
@@ -366,17 +393,34 @@ async fn heartbeat(config: &Config, channel: Channel) -> Result<ResponseCode, Bo
     Ok(ResponseCode::Exit)
 }
 
-async fn read_all(gpio: &GpioConfig) -> Vec<u8> {
-    let line_len = gpio.lines.as_ref().unwrap().len();
-    let mut chip = Chip::new(gpio.chip.clone().unwrap()).unwrap();
-    let handle = chip
-        .get_lines(&gpio.lines.clone().unwrap())
-        .unwrap()
-        .request(LineRequestFlags::INPUT, &vec![0; line_len], "multiread")
-        .unwrap();
-    let values = handle.get_values().unwrap();
-    println!("Initial GPIO values: {:?}", values);
-    values
+async fn read_all(config: &Config) -> Option<Vec<u8>> {
+    let chip = config.gpio.clone().unwrap().chip;
+    let lines = config.gpio.clone().unwrap().lines;
+
+    match (chip, lines) {
+        (Some(chip), Some(lines)) => {
+            let chip = Chip::new(chip);
+            if chip.is_err() {
+                eprintln!("Error {:?}", chip.err());
+                None
+            } else {
+                let l = chip.unwrap().get_lines(&lines);
+                if l.is_err() {
+                    eprintln!("Error {:?}", l.err());
+                    None
+                } else {
+                    let handle = l
+                        .unwrap()
+                        .request(LineRequestFlags::INPUT, &vec![0; lines.len()], "multiread")
+                        .unwrap();
+                    let values = handle.get_values().unwrap();
+                    eprintln!("Initial GPIO values: {:?}", values);
+                    Some(values)
+                }
+            }
+        }
+        _ => None,
+    }
 }
 
 async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
