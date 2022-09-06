@@ -183,42 +183,15 @@ async fn gpiomon(
     Ok(ResponseCode::Exit)
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Parse config
-    let conf_str: String = fs::read_to_string("conf.toml").expect("Unable to read config file");
-    let config: Config = toml::from_str(&conf_str).unwrap();
-
-    // Connect to server
-    //let server: ServerConfig = config.server;
-    let pem = tokio::fs::read("/etc/ssl/certs/ca-certificates.crt").await?;
-    let ca = Certificate::from_pem(pem);
-
-    let tls = ClientTlsConfig::new()
-        .ca_certificate(ca)
-        .domain_name(config.server.address.clone());
-
-    let endpoint = Channel::builder(
-        format!(
-            "https://{}:{}",
-            &config.server.address.clone(),
-            config.server.port
-        )
-        .parse()
-        .unwrap(),
-    )
-    .tls_config(tls)?;
-
-    let channel = endpoint.connect_lazy();
-
+async fn send_initial_values(
+    config: &Config,
+    channel: Channel,
+    initial_gpio_vals: &Option<Vec<u8>>,
+) {
     // Add retries with backoff
     let mut s = config.time.sleep_min_s;
     let ms = rand::thread_rng().gen_range(0..=500);
 
-    // Get initial GPIO values
-    let initial_gpio_vals: Option<Vec<u8>> = read_all(&config).await;
-
-    // Send initial values
     loop {
         if initial_gpio_vals.is_some() {
             for (i, elem) in initial_gpio_vals.clone().unwrap().iter().enumerate() {
@@ -298,6 +271,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         }
     }
+}
+
+async fn setup_server(config: &Config) -> Channel {
+    // Connect to server
+    //let server: ServerConfig = config.server;
+    let pem = tokio::fs::read("/etc/ssl/certs/ca-certificates.crt").await;
+    let ca = Certificate::from_pem(pem.unwrap());
+
+    let tls = ClientTlsConfig::new()
+        .ca_certificate(ca)
+        .domain_name(config.server.address.clone());
+
+    let endpoint = Channel::builder(
+        format!(
+            "https://{}:{}",
+            &config.server.address.clone(),
+            config.server.port
+        )
+        .parse()
+        .unwrap(),
+    )
+    .tls_config(tls)
+    .unwrap();
+
+    endpoint.connect_lazy()
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Parse config
+    let config: Config =
+        toml::from_str(&fs::read_to_string("conf.toml").expect("Unable to read config file"))
+            .expect("Unable to parse config");
+
+    let channel = setup_server(&config).await;
+
+    // Get and send initial GPIO values
+    let initial_gpio_vals: Option<Vec<u8>> = read_all(&config).await;
+    send_initial_values(&config, channel.clone(), &initial_gpio_vals).await;
+
     let heartbeat_future = heartbeat(&config, channel.clone());
 
     // TODO: refactor this ugly part
@@ -390,7 +403,6 @@ async fn heartbeat(config: &Config, channel: Channel) -> Result<ResponseCode, Bo
             Err(e) => eprintln!("The server could not receive the heart beat. Status: {e}"),
         };
     }
-    Ok(ResponseCode::Exit)
 }
 
 async fn read_all(config: &Config) -> Option<Vec<u8>> {
