@@ -298,12 +298,22 @@ async fn setup_server(config: &Config) -> Channel {
     endpoint.connect_lazy()
 }
 
+fn load_config() -> Config {
+    let local_conf = home::home_dir()
+        .expect("Could not find home directory")
+        .join(".config/ada-client/conf.toml");
+    let fallback_conf = "/etc/opt/ada-client/conf.toml";
+
+    toml::from_str(
+        &fs::read_to_string(local_conf)
+            .unwrap_or_else(|_| fs::read_to_string(fallback_conf).unwrap()),
+    )
+    .expect("Failed to load any config file.")
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Parse config
-    let config: Config =
-        toml::from_str(&fs::read_to_string("conf.toml").expect("Unable to read config file"))
-            .expect("Unable to parse config");
+    let config = load_config();
 
     let channel = setup_server(&config).await;
 
