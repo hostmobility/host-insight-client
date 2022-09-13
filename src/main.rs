@@ -416,8 +416,8 @@ async fn heartbeat(config: &Config, channel: Channel) -> Result<ResponseCode, Bo
 }
 
 async fn read_all(config: &Config) -> Option<Vec<u8>> {
-    let chip = config.gpio.clone().unwrap().chip;
-    let lines = config.gpio.clone().unwrap().lines;
+    let chip = config.gpio.as_ref()?.clone().chip;
+    let lines = config.gpio.as_ref()?.clone().lines;
 
     match (chip, lines) {
         (Some(chip), Some(lines)) => {
