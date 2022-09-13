@@ -1,6 +1,6 @@
 use async_std::task;
 use elevator::elevator_client::ElevatorClient;
-use elevator::{Id, Point, ResponseCode, Value, Values};
+use elevator::{elevator_server, Id, Point, ResponseCode, Value, Values};
 use futures::future::{try_join, try_join3, try_join_all};
 use futures::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
@@ -37,6 +37,7 @@ struct ServerConfig {
 struct GpioConfig {
     chip: Option<String>,
     lines: Option<Vec<u32>>,
+    offset: Option<u32>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -57,8 +58,6 @@ struct GpsData {
     longitude: f64,
     latitude: f64,
 }
-
-const GPIO_LINE_OFFSET: u32 = 5;
 
 async fn send_value(
     uid: u32,
@@ -139,6 +138,8 @@ async fn gpiomon(
 ) -> Result<ResponseCode, Box<dyn Error>> {
     let mut chip = Chip::new(config.gpio.clone().unwrap().chip.unwrap())?;
     let line = chip.get_line(gpio_n)?;
+    let line_offset = config.gpio.clone().unwrap().offset.unwrap_or_default();
+
     let mut events = AsyncLineEventHandle::new(line.events(
         LineRequestFlags::INPUT,
         EventRequestFlags::BOTH_EDGES,
@@ -153,7 +154,7 @@ async fn gpiomon(
         match send_value(
             config.uid,
             channel.clone(),
-            &format!("Digital {}", gpio_n - GPIO_LINE_OFFSET),
+            &format!("Digital {}", gpio_n - line_offset),
             event?.event_type() == EventType::RisingEdge,
         )
         .await
