@@ -450,8 +450,8 @@ async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
     if code == ResponseCode::SoftwareUpdate {
         let mut process = Command::new("curl")
             .arg("-o")
-            .arg("client-new")
-            .arg("https://hm.fps-gbg.net/files/ada/client")
+            .arg("ada-client-new")
+            .arg("https://hm.fps-gbg.net/files/ada/ada-client")
             .spawn()
             .ok()
             .expect("Failed to execute curl.");
@@ -460,9 +460,14 @@ async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
             Err(e) => return Err(e),
         }
     } else if code == ResponseCode::ConfigUpdate {
+        let local_conf_dir = home::home_dir()
+            .expect("Could not find home directory")
+            .join(".config/ada-client/");
+        fs::create_dir_all(&local_conf_dir)?;
+        let new_local_conf = local_conf_dir.join("conf.toml-new");
         let mut process = Command::new("curl")
             .arg("-o")
-            .arg("conf.toml-new")
+            .arg(new_local_conf)
             .arg("https://hm.fps-gbg.net/files/ada/conf.toml")
             .spawn()
             .ok()
