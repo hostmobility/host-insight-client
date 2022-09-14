@@ -1,6 +1,6 @@
 use async_std::task;
 use elevator::elevator_client::ElevatorClient;
-use elevator::{elevator_server, Id, Point, ResponseCode, Value, Values};
+use elevator::{Id, Point, ResponseCode, Value, Values};
 use futures::future::{try_join, try_join3, try_join_all};
 use futures::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
@@ -42,8 +42,14 @@ struct GpioConfig {
 
 #[derive(Deserialize, Clone)]
 struct CanConfig {
+    ports: Option<Vec<CanPort>>,
+}
+
+#[derive(Deserialize, Clone)]
+struct CanPort {
+    name: String,
     bitrate: Option<u32>,
-    ports: Option<Vec<String>>,
+    listen_only: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -113,12 +119,12 @@ async fn send_point(
     Ok(response.into_inner().rc)
 }
 
-async fn canmon(config: &Config, port: &str) -> Result<ResponseCode, Box<dyn Error>> {
-    let mut socket_rx = CANSocket::open(port)?;
-    eprintln!("Start reading on {port}");
-    if let Some(bitrate) = config.can.as_ref().unwrap().bitrate {
-        eprintln!("Default bitrate: {bitrate}");
-    }
+async fn canmon(config: &Config, port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
+    let mut socket_rx = CANSocket::open(&port.name.clone())?;
+    //eprintln!("Start reading on {}", &port.name.unwrap());
+    // if let Some(bitrate) = config.can.as_ref().unwrap().bitrate {
+    //     eprintln!("Default bitrate: {bitrate}");
+    // }
     while let Some(frame) = socket_rx.next().await {
         eprintln!("{:#?}", frame);
     }
@@ -274,6 +280,55 @@ async fn send_initial_values(
     }
 }
 
+fn setup_can(config: &Config) {
+    for p in config.can.clone().unwrap().ports.unwrap() {
+        let interface = p.name;
+
+        let mut bitrate = "500000".to_string();
+        if p.bitrate.is_some() {
+            bitrate = p.bitrate.unwrap().to_string();
+        }
+
+        // ip link set INTERFACE down
+        let mut process = Command::new("ip")
+            .arg("link")
+            .arg("set")
+            .arg(&interface)
+            .arg("down")
+            .spawn()
+            .ok()
+            .expect("Failed to run ip command.");
+        match process.wait() {
+            Ok(_) => eprintln!("Interface {} is down", &interface),
+            Err(e) => panic!("Error: {}", e),
+        }
+
+        // ip link set up INTERFACE type can bitrate BITRATE listen-only {ON/OFF}
+        let mut listen_only_state = "on";
+        if p.listen_only.is_some() && !p.listen_only.unwrap() {
+            listen_only_state = "off";
+        }
+        let mut process = Command::new("ip")
+            .arg("link")
+            .arg("set")
+            .arg("up")
+            .arg(&interface)
+            .arg("type")
+            .arg("can")
+            .arg("bitrate")
+            .arg(&bitrate)
+            .arg("listen-only")
+            .arg(listen_only_state)
+            .spawn()
+            .ok()
+            .expect("Failed to run ip command.");
+        match process.wait() {
+            Ok(_) => eprintln!("Interface {} is up", &interface),
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+}
+
 async fn setup_server(config: &Config) -> Channel {
     // Connect to server
     //let server: ServerConfig = config.server;
@@ -314,6 +369,13 @@ fn load_config() -> Config {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // let local_conf = home::home_dir()
+    //     .expect("Could not find home directory")
+    //     .join(".config/ada-client/conf.toml");
+
+    // let config: toml::Value = toml::from_str(&fs::read_to_string(local_conf).unwrap()).unwrap();
+    // println!("{:?}", config);
+    // std::process::exit(0);
     let config = load_config();
 
     let channel = setup_server(&config).await;
@@ -332,10 +394,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             gpiomon_futures.push(gpiomon(&config, *l, channel.clone()));
         }
 
+        setup_can(&config);
         let can_ports = config.can.clone().unwrap().ports.unwrap();
         let mut canmon_futures = vec![canmon(&config, &can_ports[0])];
-        for l in &can_ports[1..] {
-            canmon_futures.push(canmon(&config, l));
+        for p in &can_ports[1..] {
+            canmon_futures.push(canmon(&config, p));
         }
         match try_join3(
             try_join_all(gpiomon_futures),
@@ -348,10 +411,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => eprintln!("Some task failed: {e}"),
         };
     } else if config.can.is_some() {
+        setup_can(&config);
         let can_ports = config.can.clone().unwrap().ports.unwrap();
         let mut canmon_futures = vec![canmon(&config, &can_ports[0])];
-        for l in &can_ports[1..] {
-            canmon_futures.push(canmon(&config, l));
+        for p in &can_ports[1..] {
+            canmon_futures.push(canmon(&config, p));
         }
         match try_join(try_join_all(canmon_futures), heartbeat_future).await {
             Ok(_) => eprintln!("All tasks completed successfully"),
