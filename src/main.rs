@@ -1,6 +1,7 @@
 use async_std::task;
+use can_dbc::{ByteOrder, SignalExtendedValueType};
 use elevator::elevator_client::ElevatorClient;
-use elevator::{Id, Point, ResponseCode, Value, Values};
+use elevator::{CanMessage, CanSignal, Id, Point, ResponseCode, Value, Values};
 use futures::future::{try_join, try_join3, try_join_all};
 use futures::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
@@ -8,7 +9,10 @@ use rand::Rng;
 use serde_derive::Deserialize;
 use std::error::Error;
 use std::fs;
+use std::fs::File;
+use std::io::prelude::*;
 use std::process::Command;
+use std::str;
 use std::time::Duration;
 use tokio_socketcan::CANSocket;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig};
@@ -42,6 +46,7 @@ struct GpioConfig {
 #[derive(Deserialize, Clone)]
 struct CanConfig {
     ports: Option<Vec<CanPort>>,
+    dbc_file: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -96,6 +101,20 @@ async fn send_value(
     Ok(response.into_inner().rc)
 }
 
+async fn send_can_message(
+    channel: Channel,
+    can_message: CanMessage,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    let mut client = ElevatorClient::new(channel);
+
+    //Create request of type CanMessage. The latter is defined in elevator.proto
+    let request = tonic::Request::new(can_message);
+
+    let response = client.send_can_message(request).await?;
+    println!("RESPONSE={:?}", response);
+    Ok(response.into_inner().rc)
+}
+
 async fn send_point(
     uid: u32,
     channel: Channel,
@@ -118,24 +137,99 @@ async fn send_point(
     Ok(response.into_inner().rc)
 }
 
-async fn canmon(config: &Config, port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
-    let mut socket_rx = CANSocket::open(&port.name.clone())?;
-    //eprintln!("Start reading on {}", &port.name.unwrap());
-    // if let Some(bitrate) = config.can.as_ref().unwrap().bitrate {
-    //     eprintln!("Default bitrate: {bitrate}");
-    // }
-    while let Some(frame) = socket_rx.next().await {
-        eprintln!("{:#?}", frame);
-    }
+fn load_dbc_file(s: &str) -> Result<can_dbc::DBC, Box<dyn Error>> {
+    let path = home::home_dir()
+        .expect("Path could not be found")
+        .join(format!(".config/ada-client/{}", s));
+
+    let mut f = File::open(path)?;
+    let mut buffer = Vec::new();
+    f.read_to_end(&mut buffer)?;
+    let dbc = can_dbc::DBC::from_slice(&buffer).expect("Failed to parse dbc file");
+    Ok(dbc)
+}
+
+async fn can_monitor(
+    config: &Config,
+    port: &CanPort,
+    channel: Channel,
+) -> Result<ResponseCode, Box<dyn Error>> {
+    let dbc = load_dbc_file(config.can.as_ref().unwrap().dbc_file.as_ref().unwrap())
+        .expect("Failed to load DBC file");
 
     // Add retries with backoff
-    // let mut s = config.time.sleep_min_s;
-    // let ms = rand::thread_rng().gen_range(0..=500);
+    let mut s = config.time.sleep_min_s;
+    let ms = rand::thread_rng().gen_range(0..=500);
+
+    let mut socket_rx = CANSocket::open(&port.name.clone())?;
+    eprintln!("Start reading from {}", &port.name);
+    if let Some(bitrate) = &port.bitrate {
+        eprintln!("Bitrate: {bitrate}");
+    }
+
+    while let Some(frame) = socket_rx.next().await {
+        for message in dbc.messages() {
+            if frame.as_ref().unwrap().id() == message.message_id().0 {
+                let data = frame.as_ref().unwrap().data();
+                let mut can_signals: Vec<CanSignal> = Vec::new();
+                for signal in message.signals() {
+                    let signal_unit = if str::is_empty(signal.unit()) {
+                        "N/A".to_string()
+                    } else {
+                        signal.unit().clone()
+                    };
+
+                    let can_signal: CanSignal = CanSignal {
+                        signal_name: signal.name().clone(),
+                        unit: signal_unit,
+                        value: match get_can_signal_value(message.message_id(), data, signal, &dbc)
+                        {
+                            Some(val) => Some(val),
+                            None => Some(elevator::can_signal::Value::ValF64(0.0)),
+                        },
+                    };
+                    can_signals.push(can_signal);
+                }
+
+                let can_message: CanMessage = CanMessage {
+                    unit_id: config.uid.to_string(),
+                    bus: port.name.clone(),
+                    time_stamp: None, // The tokio_socketcan library currently lacks support for timestamps, but see https://github.com/socketcan-rs/socketcan-rs/issues/22
+                    signal: can_signals.clone(),
+                };
+
+                match send_can_message(channel.clone(), can_message).await {
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        eprintln!("Sleeping for {s}.{ms} s");
+                        task::sleep(Duration::from_millis(s * 1000 + ms)).await;
+                        s = std::cmp::min(s * 2, config.time.sleep_max_s);
+                    }
+                    Ok(r) => {
+                        match ResponseCode::from_i32(r) {
+                            Some(ResponseCode::CarryOn) => s = config.time.sleep_min_s,
+                            Some(ResponseCode::Exit) => std::process::exit(0),
+                            Some(ResponseCode::SoftwareUpdate) => {
+                                println!("Software update");
+                                match download(ResponseCode::SoftwareUpdate).await {
+                                    Err(_) => {
+                                        eprintln!("Download failed. Let's continue as if nothing happened.")
+                                    }
+                                    Ok(_) => std::process::exit(0),
+                                }
+                            }
+                            _ => panic!("Unrecognized response code {r}"),
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     Ok(ResponseCode::Exit)
 }
 
-async fn gpiomon(
+async fn gpio_monitor(
     config: &Config,
     gpio_n: u32,
     //gpio_values: &HashMap<String, bool>,
@@ -364,13 +458,6 @@ fn load_config() -> Config {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // let local_conf = home::home_dir()
-    //     .expect("Could not find home directory")
-    //     .join(".config/ada-client/conf.toml");
-
-    // let config: toml::Value = toml::from_str(&fs::read_to_string(local_conf).unwrap()).unwrap();
-    // println!("{:?}", config);
-    // std::process::exit(0);
     let config = load_config();
 
     let channel = setup_server(&config).await;
@@ -384,20 +471,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: refactor this ugly part
     if initial_gpio_vals.is_some() && config.can.is_some() {
         let lines = config.gpio.clone().unwrap().lines.unwrap();
-        let mut gpiomon_futures = vec![gpiomon(&config, lines[0], channel.clone())];
+        let mut gpio_monitor_futures = vec![gpio_monitor(&config, lines[0], channel.clone())];
         for l in &lines[1..] {
-            gpiomon_futures.push(gpiomon(&config, *l, channel.clone()));
+            gpio_monitor_futures.push(gpio_monitor(&config, *l, channel.clone()));
         }
 
         setup_can(&config);
         let can_ports = config.can.clone().unwrap().ports.unwrap();
-        let mut canmon_futures = vec![canmon(&config, &can_ports[0])];
+        let mut can_monitor_futures = vec![can_monitor(&config, &can_ports[0], channel.clone())];
         for p in &can_ports[1..] {
-            canmon_futures.push(canmon(&config, p));
+            can_monitor_futures.push(can_monitor(&config, p, channel.clone()));
         }
         match try_join3(
-            try_join_all(gpiomon_futures),
-            try_join_all(canmon_futures),
+            try_join_all(gpio_monitor_futures),
+            try_join_all(can_monitor_futures),
             heartbeat_future,
         )
         .await
@@ -408,22 +495,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else if config.can.is_some() {
         setup_can(&config);
         let can_ports = config.can.clone().unwrap().ports.unwrap();
-        let mut canmon_futures = vec![canmon(&config, &can_ports[0])];
+        let mut can_monitor_futures = vec![can_monitor(&config, &can_ports[0], channel.clone())];
         for p in &can_ports[1..] {
-            canmon_futures.push(canmon(&config, p));
+            can_monitor_futures.push(can_monitor(&config, p, channel.clone()));
         }
-        match try_join(try_join_all(canmon_futures), heartbeat_future).await {
+        match try_join(try_join_all(can_monitor_futures), heartbeat_future).await {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
     } else if initial_gpio_vals.is_some() {
         let lines = config.gpio.clone().unwrap().lines.unwrap();
-        let mut gpiomon_futures = vec![gpiomon(&config, lines[0], channel.clone())];
+        let mut gpio_monitor_futures = vec![gpio_monitor(&config, lines[0], channel.clone())];
         for l in &lines[1..] {
-            gpiomon_futures.push(gpiomon(&config, *l, channel.clone()));
+            gpio_monitor_futures.push(gpio_monitor(&config, *l, channel.clone()));
         }
 
-        match try_join(try_join_all(gpiomon_futures), heartbeat_future).await {
+        match try_join(try_join_all(gpio_monitor_futures), heartbeat_future).await {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
@@ -505,6 +592,79 @@ async fn read_all(config: &Config) -> Option<Vec<u8>> {
     }
 }
 
+// Get the can signal value based on the message ID, the data part of
+// the frame, the signal, and extra metadata contained in the DBC
+// file.
+// The following can_signal::Value types can be returned:
+//   Value::ValF64, ValStr, ValI64, ValU64
+fn get_can_signal_value(
+    id: &can_dbc::MessageId,
+    d: &[u8],
+    s: &can_dbc::Signal,
+    dbc: &can_dbc::DBC,
+) -> Option<elevator::can_signal::Value> {
+    let mut value_type_extended: Option<can_dbc::SignalExtendedValueType> =
+        Some(can_dbc::SignalExtendedValueType::SignedOrUnsignedInteger);
+
+    for elem in dbc.signal_extended_value_type_list() {
+        if elem.signal_name() == s.name() {
+            value_type_extended = Some(*elem.signal_extended_value_type());
+            break;
+        }
+    }
+
+    // Value descriptions are strings that correspond to a numeric value in a dictionary
+    let val_desc = dbc.value_descriptions_for_signal(*id, s.name());
+
+    let frame_data: [u8; 8] = d
+        .try_into()
+        .expect("Failed to parse data slice as an array");
+
+    let signal_value: u64 = if *s.byte_order() == ByteOrder::LittleEndian {
+        u64::from_le_bytes(frame_data)
+    } else {
+        u64::from_be_bytes(frame_data)
+    };
+
+    // Calculate signal value
+    let bit_mask: u64 = 2u64.pow(*s.signal_size() as u32) - 1;
+    let signal_value = (signal_value >> s.start_bit()) & bit_mask;
+
+    if let Some(desc) = val_desc {
+        for elem in desc {
+            if *elem.a() == signal_value as f64 {
+                return Some(elevator::can_signal::Value::ValStr(elem.b().to_string()));
+            }
+        }
+        return None;
+    }
+    match value_type_extended {
+        Some(SignalExtendedValueType::IEEEfloat32Bit) => Some(elevator::can_signal::Value::ValF64(
+            f64::from_bits(signal_value) as f64 * s.factor + s.offset,
+        )),
+        _ => match *s.value_type() {
+            can_dbc::ValueType::Unsigned => {
+                if is_float(s.factor) || is_float(s.offset) {
+                    Some(elevator::can_signal::Value::ValF64(
+                        signal_value as f64 * s.factor + s.offset,
+                    ))
+                } else {
+                    Some(elevator::can_signal::Value::ValU64(signal_value))
+                }
+            }
+            can_dbc::ValueType::Signed => {
+                if is_float(s.factor) || is_float(s.offset) {
+                    Some(elevator::can_signal::Value::ValF64(
+                        signal_value as f64 * s.factor + s.offset,
+                    ))
+                } else {
+                    Some(elevator::can_signal::Value::ValI64(signal_value as i64))
+                }
+            }
+        },
+    }
+}
+
 async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
     if code == ResponseCode::SoftwareUpdate {
         let mut process = Command::new("curl")
@@ -538,4 +698,8 @@ async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
     }
 
     Ok(())
+}
+
+fn is_float(f: f64) -> bool {
+    f != f as u64 as f64
 }
