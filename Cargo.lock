@@ -18,6 +18,7 @@ dependencies = [
  "libc",
  "nix 0.25.0",
  "prost",
+ "prost-build",
  "rand",
  "serde",
  "serde_derive",
