@@ -30,7 +30,6 @@ struct Config {
 #[derive(Deserialize)]
 struct ServerConfig {
     address: String,
-    port: u16,
 }
 
 #[derive(Deserialize, Clone)]
@@ -340,13 +339,9 @@ async fn setup_server(config: &Config) -> Channel {
         .domain_name(config.server.address.clone());
 
     let endpoint = Channel::builder(
-        format!(
-            "https://{}:{}",
-            &config.server.address.clone(),
-            config.server.port
-        )
-        .parse()
-        .unwrap(),
+        format!("https://{}", &config.server.address.clone())
+            .parse()
+            .unwrap(),
     )
     .tls_config(tls)
     .unwrap();
