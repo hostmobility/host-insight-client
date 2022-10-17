@@ -197,7 +197,6 @@ async fn can_monitor(
                     time_stamp: None, // The tokio_socketcan library currently lacks support for timestamps, but see https://github.com/socketcan-rs/socketcan-rs/issues/22
                     signal: can_signals.clone(),
                 };
-
                 match send_can_message(channel.clone(), can_message).await {
                     Err(e) => {
                         eprintln!("Error: {e}");
@@ -603,6 +602,53 @@ fn get_can_signal_value(
     s: &can_dbc::Signal,
     dbc: &can_dbc::DBC,
 ) -> Option<elevator::can_signal::Value> {
+    let frame_data: [u8; 8] = d
+        .try_into()
+        .expect("Failed to parse data slice as an array");
+
+    let frame_value: u64 = if *s.byte_order() == ByteOrder::LittleEndian {
+        u64::from_le_bytes(frame_data)
+    } else {
+        u64::from_be_bytes(frame_data)
+    };
+
+    let signal_value = get_signal_value(frame_value, *s.start_bit(), *s.signal_size());
+
+    match get_signal_value_type(s, dbc, id) {
+        Some(SignalValueType::FLOAT) => get_float(signal_value, *s.factor(), *s.offset()),
+        Some(SignalValueType::SIGNED) => {
+            get_signed_number(signal_value, *s.signal_size(), *s.factor(), *s.offset())
+        }
+        Some(SignalValueType::UNSIGNED) => {
+            get_unsigned_number(signal_value, *s.factor(), *s.offset())
+        }
+        Some(SignalValueType::DOUBLE) => get_double(signal_value, *s.factor(), *s.offset()),
+        // FIXME: IMPLEMENT BOOL
+        Some(SignalValueType::STRING) => get_string(signal_value, dbc, id, s),
+        _ => None,
+    }
+}
+
+#[derive(Debug)]
+enum SignalValueType {
+    FLOAT,
+    SIGNED,
+    UNSIGNED,
+    DOUBLE,
+    // BOOL,  UNIMPLEMENTED
+    STRING,
+}
+
+fn get_signal_value_type(
+    s: &can_dbc::Signal,
+    dbc: &can_dbc::DBC,
+    id: &can_dbc::MessageId,
+) -> Option<SignalValueType> {
+    let val_desc = dbc.value_descriptions_for_signal(*id, s.name());
+    if val_desc.is_some() {
+        return Some(SignalValueType::STRING);
+    }
+
     let mut value_type_extended: Option<can_dbc::SignalExtendedValueType> =
         Some(can_dbc::SignalExtendedValueType::SignedOrUnsignedInteger);
 
@@ -612,23 +658,24 @@ fn get_can_signal_value(
             break;
         }
     }
+    match value_type_extended {
+        Some(SignalExtendedValueType::IEEEfloat32Bit) => Some(SignalValueType::FLOAT),
+        Some(SignalExtendedValueType::IEEEdouble64bit) => Some(SignalValueType::DOUBLE),
+        Some(SignalExtendedValueType::SignedOrUnsignedInteger) => match *s.value_type() {
+            can_dbc::ValueType::Unsigned => Some(SignalValueType::UNSIGNED),
+            can_dbc::ValueType::Signed => Some(SignalValueType::SIGNED),
+        },
+        _ => None,
+    }
+}
 
-    // Value descriptions are strings that correspond to a numeric value in a dictionary
+fn get_string(
+    signal_value: u64,
+    dbc: &can_dbc::DBC,
+    id: &can_dbc::MessageId,
+    s: &can_dbc::Signal,
+) -> Option<elevator::can_signal::Value> {
     let val_desc = dbc.value_descriptions_for_signal(*id, s.name());
-
-    let frame_data: [u8; 8] = d
-        .try_into()
-        .expect("Failed to parse data slice as an array");
-
-    let signal_value: u64 = if *s.byte_order() == ByteOrder::LittleEndian {
-        u64::from_le_bytes(frame_data)
-    } else {
-        u64::from_be_bytes(frame_data)
-    };
-
-    // Calculate signal value
-    let bit_mask: u64 = 2u64.pow(*s.signal_size() as u32) - 1;
-    let signal_value = (signal_value >> s.start_bit()) & bit_mask;
 
     if let Some(desc) = val_desc {
         for elem in desc {
@@ -636,33 +683,78 @@ fn get_can_signal_value(
                 return Some(elevator::can_signal::Value::ValStr(elem.b().to_string()));
             }
         }
-        return None;
+        // Signal exists in value description but key could not be found
+        return Some(elevator::can_signal::Value::ValStr(
+            signal_value.to_string(),
+        ));
     }
-    match value_type_extended {
-        Some(SignalExtendedValueType::IEEEfloat32Bit) => Some(elevator::can_signal::Value::ValF64(
-            f64::from_bits(signal_value) as f64 * s.factor + s.offset,
-        )),
-        _ => match *s.value_type() {
-            can_dbc::ValueType::Unsigned => {
-                if is_float(s.factor) || is_float(s.offset) {
-                    Some(elevator::can_signal::Value::ValF64(
-                        signal_value as f64 * s.factor + s.offset,
-                    ))
-                } else {
-                    Some(elevator::can_signal::Value::ValU64(signal_value))
-                }
-            }
-            can_dbc::ValueType::Signed => {
-                if is_float(s.factor) || is_float(s.offset) {
-                    Some(elevator::can_signal::Value::ValF64(
-                        signal_value as f64 * s.factor + s.offset,
-                    ))
-                } else {
-                    Some(elevator::can_signal::Value::ValI64(signal_value as i64))
-                }
-            }
-        },
+    None
+}
+
+fn get_float(
+    signal_value: u64,
+    signal_factor: f64,
+    signal_offset: f64,
+) -> Option<elevator::can_signal::Value> {
+    Some(elevator::can_signal::Value::ValF64(
+        f32::from_bits(signal_value as u32) as f64 * signal_factor + signal_offset,
+    ))
+}
+
+fn get_double(
+    signal_value: u64,
+    signal_factor: f64,
+    signal_offset: f64,
+) -> Option<elevator::can_signal::Value> {
+    Some(elevator::can_signal::Value::ValF64(
+        f64::from_bits(signal_value) * signal_factor + signal_offset,
+    ))
+}
+
+fn get_unsigned_number(
+    signal_value: u64,
+    signal_factor: f64,
+    signal_offset: f64,
+) -> Option<elevator::can_signal::Value> {
+    if is_float(signal_factor) || is_float(signal_offset) {
+        return Some(elevator::can_signal::Value::ValF64(
+            signal_value as f64 * signal_factor + signal_offset,
+        ));
     }
+    Some(elevator::can_signal::Value::ValU64(
+        signal_value * signal_factor as u64 + signal_offset as u64,
+    ))
+}
+
+fn get_signed_number(
+    signal_value: u64,
+    signal_length: u64,
+    signal_factor: f64,
+    signal_offset: f64,
+) -> Option<elevator::can_signal::Value> {
+    let signed_mask = 1 << (signal_length - 1);
+    let is_negative = (signed_mask & signal_value) != 0;
+    if is_negative {
+        if is_float(signal_factor) || is_float(signal_offset) {
+            return Some(elevator::can_signal::Value::ValF64(
+                ((signal_value & !signed_mask) as i64 * -1) as f64 * signal_factor + signal_offset,
+            ));
+        }
+        return Some(elevator::can_signal::Value::ValI64(
+            ((signal_value & !signed_mask) as i64 * -1) * signal_factor as i64
+                + signal_offset as i64,
+        ));
+    }
+
+    if is_float(signal_factor) || is_float(signal_offset) {
+        return Some(elevator::can_signal::Value::ValF64(
+            signal_value as f64 * signal_factor + signal_offset,
+        ));
+    }
+
+    Some(elevator::can_signal::Value::ValI64(
+        signal_value as i64 * signal_factor as i64 + signal_offset as i64,
+    ))
 }
 
 async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
@@ -702,4 +794,13 @@ async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
 
 fn is_float(f: f64) -> bool {
     f != f as u64 as f64
+}
+
+fn get_signal_value(frame_value: u64, start_bit: u64, signal_size: u64) -> u64 {
+    if signal_size == 64 {
+        return frame_value;
+    }
+
+    let bit_mask: u64 = 2u64.pow(signal_size as u32) - 1;
+    ((frame_value >> start_bit) & bit_mask) as u64
 }
