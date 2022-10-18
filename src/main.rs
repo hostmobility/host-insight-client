@@ -173,8 +173,17 @@ async fn can_monitor(
                 let data = frame.as_ref().unwrap().data();
                 let mut can_signals: Vec<CanSignal> = Vec::new();
                 for signal in message.signals() {
+                    let can_signal_value =
+                        match get_can_signal_value(message.message_id(), data, signal, &dbc) {
+                            Some(val) => Some(val),
+                            None => Some(elevator::can_signal::Value::ValF64(0.0)),
+                        };
+
                     let signal_unit = if str::is_empty(signal.unit()) {
-                        "N/A".to_string()
+                        match can_signal_value {
+                            Some(elevator::can_signal::Value::ValStr(_)) => "enum".to_string(),
+                            _ => "N/A".to_string(),
+                        }
                     } else {
                         signal.unit().clone()
                     };
@@ -182,11 +191,7 @@ async fn can_monitor(
                     let can_signal: CanSignal = CanSignal {
                         signal_name: signal.name().clone(),
                         unit: signal_unit,
-                        value: match get_can_signal_value(message.message_id(), data, signal, &dbc)
-                        {
-                            Some(val) => Some(val),
-                            None => Some(elevator::can_signal::Value::ValF64(0.0)),
-                        },
+                        value: can_signal_value,
                     };
                     can_signals.push(can_signal);
                 }
