@@ -176,7 +176,8 @@ async fn can_monitor(
                     let can_signal_value =
                         match get_can_signal_value(message.message_id(), data, signal, &dbc) {
                             Some(val) => Some(val),
-                            None => Some(elevator::can_signal::Value::ValF64(0.0)),
+                            // FIXME: Report an error to the server instead of just skipping the signal
+                            None => continue,
                         };
 
                     let signal_unit = if str::is_empty(signal.unit()) {
