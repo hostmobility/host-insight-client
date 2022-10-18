@@ -22,10 +22,10 @@ The following responses can be handled:
 
 The following signal values are supported:
 
-- signed integers (1--64 bits)
-- unsigned integers (1--64 bits)
-- 32-bit floats including from extended value type list
-- strings from value descriptions
+- signed integers
+- unsigned integers
+- floats including from extended value type list
+- strings (enums) from value descriptions
 
 CAN timestamps are not yet implemented.
 
