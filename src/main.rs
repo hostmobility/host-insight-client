@@ -97,7 +97,6 @@ async fn send_value(
     //send_values is the defined RPC SendValues. Rust converts to snake_case
     let response = client.send_values(request).await?;
 
-    println!("RESPONSE={:?}", response);
     Ok(response.into_inner().rc)
 }
 
@@ -111,7 +110,6 @@ async fn send_can_message(
     let request = tonic::Request::new(can_message);
 
     let response = client.send_can_message(request).await?;
-    println!("RESPONSE={:?}", response);
     Ok(response.into_inner().rc)
 }
 
@@ -133,7 +131,6 @@ async fn send_point(
     //send_values is the defined RPC SendValues. Rust converts to snail-case
     let response = client.send_position(point).await?;
 
-    println!("RESPONSE={:?}", response);
     Ok(response.into_inner().rc)
 }
 
