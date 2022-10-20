@@ -15,6 +15,7 @@ dependencies = [
  "gpio-cdev",
  "home",
  "indexmap",
+ "lazy_static",
  "libc",
  "nix 0.25.0",
  "prost",
