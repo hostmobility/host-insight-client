@@ -44,7 +44,7 @@ The application will look for a conf.toml file firstly in
 Example configuration that enables six digital-in and two CAN ports:
 
 ```
-uid = 42
+uid = "42"
 
 [gpio]
 chip = "/dev/gpiochip10"

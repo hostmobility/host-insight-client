@@ -31,7 +31,7 @@ lazy_static! {
 
 #[derive(Deserialize)]
 struct Config {
-    uid: u32,
+    uid: String,
     can: Option<CanConfig>,
     gpio: Option<GpioConfig>,
     server: ServerConfig,
@@ -103,7 +103,7 @@ async fn send_value(
 
     //Create request of type Values. Values is defined in elevator.proto
     let request = tonic::Request::new(Values {
-        unit_id: CONFIG.uid.to_string(),
+        unit_id: CONFIG.uid.clone(),
         measurements: v,
     });
 
@@ -132,7 +132,7 @@ async fn send_point(channel: Channel) -> Result<i32, Box<dyn std::error::Error>>
 
     //Create measurement of type Value
     let point = Point {
-        unit_id: CONFIG.uid.to_string(),
+        unit_id: CONFIG.uid.clone(),
         longitude: CONFIG.position.longitude,
         latitude: CONFIG.position.latitude,
     };
@@ -201,7 +201,7 @@ async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, B
                 }
 
                 let can_message: CanMessage = CanMessage {
-                    unit_id: CONFIG.uid.to_string(),
+                    unit_id: CONFIG.uid.clone(),
                     bus: port.name.clone(),
                     time_stamp: None, // The tokio_socketcan library currently lacks support for timestamps, but see https://github.com/socketcan-rs/socketcan-rs/issues/22
                     signal: can_signals.clone(),
@@ -519,7 +519,7 @@ async fn heartbeat(channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
 
     //Create measurement of type Value
     let id = Id {
-        unit_id: CONFIG.uid.to_string(),
+        unit_id: CONFIG.uid.clone(),
     };
 
     loop {
