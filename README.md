@@ -9,7 +9,9 @@ a human-readable format.
 In addition, the following data is sent:
 
 - GPS location (at boot)
-- heartbeat containing the client ID (at some regular interval)
+- heartbeat containing a status code (at some regular interval)
+
+All requests contain the client ID in the header.
 
 The following responses can be handled:
 
