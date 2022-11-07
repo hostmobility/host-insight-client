@@ -190,11 +190,13 @@ async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, B
     }
 
     while let Some(frame) = socket_rx.next().await {
-        match msg_map.get_key_value(&frame.as_ref().unwrap().id()) {
-            Some(message) => {
+        if let Some(message) = msg_map.get_key_value(&frame.as_ref().unwrap().id()) {
             if frame.as_ref().unwrap().id() == message.1.message_id().0 {
                 let data = frame.as_ref().unwrap().data();
                 let mut can_signals: Vec<CanSignal> = Vec::new();
+
+                let mut multiplex_val = 0;
+
                 for signal in message.1.signals() {
                     let can_signal_value =
                         match get_can_signal_value(message.1.message_id(), data, signal, &dbc) {
@@ -211,6 +213,28 @@ async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, B
                     } else {
                         signal.unit().clone()
                     };
+                    // If the signal is a multiplexor, store the value of that signal.
+                    if is_multiplexor(signal) {
+                        if let Some(val_enum) = can_signal_value.clone() {
+                            if let can_signal::Value::ValU64(val) = val_enum {
+                                multiplex_val = val;
+                            }
+                        }
+                    }
+                    // If the value is a multiplexed signal
+                    // Check if the multiplex signal value matches the multiplexor value of this signal
+                    // Else continue and discard the signal
+                    // FIXME: This is dependent on that the multipexor signal is parsed firs in the for-loop.
+                    // otherwise the multiplex_val variable will be 0
+                    if is_multiplexed(signal) {
+                        if let Some(val_enum) = can_signal_value.clone() {
+                            if let can_signal::Value::ValU64(val) = val_enum {
+                                if multiplex_val != get_multiplex_val(signal) {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
 
                     let can_signal: CanSignal = CanSignal {
                         signal_name: signal.name().clone(),
@@ -258,11 +282,8 @@ async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, B
                     }
                 }
             }
-        },
-        None =>  {},
         }
     }
-
     Ok(ResponseCode::Exit)
 }
 
@@ -647,6 +668,59 @@ fn get_can_signal_value(
         _ => None,
     }
 }
+
+
+fn is_multiplexor(s: &can_dbc::Signal) -> bool {
+    match s.multiplexer_indicator() {
+        can_dbc::MultiplexIndicator::Multiplexor => {
+            return true;
+        },
+        can_dbc::MultiplexIndicator::MultiplexedSignal(val) => {
+            return false;
+        },
+        can_dbc::MultiplexIndicator::MultiplexorAndMultiplexedSignal(val) => {
+            return false;
+        },
+        can_dbc::MultiplexIndicator::Plain => {
+            return false;
+        },
+    }
+}
+
+fn is_multiplexed(s: &can_dbc::Signal) -> bool {
+    match s.multiplexer_indicator() {
+        can_dbc::MultiplexIndicator::Multiplexor => {
+            return false;
+        },
+        can_dbc::MultiplexIndicator::MultiplexedSignal(val) => {
+            return true;
+        },
+        can_dbc::MultiplexIndicator::MultiplexorAndMultiplexedSignal(val) => {
+            return false;
+        },
+        can_dbc::MultiplexIndicator::Plain => {
+            return false;
+        },
+    }
+}
+
+fn get_multiplex_val(s: &can_dbc::Signal) -> u64 {
+    match s.multiplexer_indicator() {
+        can_dbc::MultiplexIndicator::Multiplexor => {
+            return 0;
+        },
+        can_dbc::MultiplexIndicator::MultiplexedSignal(val) => {
+            return *val;
+        },
+        can_dbc::MultiplexIndicator::MultiplexorAndMultiplexedSignal(val) => {
+            return *val;
+        },
+        can_dbc::MultiplexIndicator::Plain => {
+            return 0;
+        },
+    }
+}
+
 
 #[derive(Debug)]
 enum SignalValueType {
