@@ -2,10 +2,11 @@ use async_std::task;
 use can_dbc::{ByteOrder, SignalExtendedValueType, MultiplexIndicator};
 use elevator::elevator_client::ElevatorClient;
 use elevator::{CanMessage, CanSignal, Point, ResponseCode, Value, Values, can_signal};
-use futures::future::{try_join, try_join3, try_join_all};
+use futures::future::{try_join, try_join3, try_join4, try_join_all};
 use futures::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
 use lazy_static::lazy_static;
+use libc::{FALLOC_FL_KEEP_SIZE, size_t};
 use rand::Rng;
 use serde_derive::Deserialize;
 use std::error::Error;
@@ -15,7 +16,10 @@ use std::io::prelude::*;
 use std::process::Command;
 use std::str;
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
+use tokio::time::{sleep};
+use futures::stream;
 use tokio_socketcan::CANSocket;
 use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig},
@@ -28,6 +32,11 @@ pub mod elevator {
 
 lazy_static! {
     static ref CONFIG: Config = load_config();
+}
+
+lazy_static! {
+    static ref CAN_MSG_QUEUE: Mutex<Vec<CanMessage>> =
+    Mutex::new(Vec::new());
 }
 
 #[derive(Deserialize)]
@@ -112,6 +121,20 @@ async fn send_value(
     Ok(response.into_inner().rc)
 }
 
+async fn send_can_message_stream(
+    channel: Channel,
+    can_messages: Vec<CanMessage>,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    let mut client = ElevatorClient::with_interceptor(channel, intercept);
+
+    //Create request of type CanMessage. The latter is defined in elevator.proto
+    let request = tonic::Request::new(stream::iter(can_messages.clone()));
+
+    let response = client.send_can_message_stream(request).await?;
+    Ok(response.into_inner().rc)
+}
+
+
 async fn send_can_message(
     channel: Channel,
     can_message: CanMessage,
@@ -163,8 +186,61 @@ fn is_can_signal_duplicate(map: &HashMap<String, Option<can_signal::Value>>, nam
     false
 }
 
+async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>>  {
+    const MAX_MSG_TO_SEND: size_t = 100;
 
-async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
+    let mut s = CONFIG.time.sleep_min_s;
+    let ms = rand::thread_rng().gen_range(0..=500);
+    loop {
+        let mut vec = Vec::new();
+
+        let mut req_map = CAN_MSG_QUEUE.lock().unwrap();
+
+        let len = req_map.len();
+
+        if len == 0 {
+            drop(req_map);
+            sleep(Duration::from_millis(100)).await;
+            continue;
+        } else {
+            if len > MAX_MSG_TO_SEND {
+                vec = req_map.drain(0..MAX_MSG_TO_SEND).collect();
+            } else {
+                vec = req_map.drain(0..len).collect();
+            }
+            drop(req_map);
+        }
+
+        match send_can_message_stream(channel.clone(), vec).await {
+            Err(e) => {
+                eprintln!("Error: {e}");
+                eprintln!("Sleeping for {s}.{ms} s");
+                task::sleep(Duration::from_millis(s * 1000 + ms)).await;
+                s = std::cmp::min(s * 2, CONFIG.time.sleep_max_s);
+            }
+            Ok(r) => {
+                match ResponseCode::from_i32(r) {
+                    Some(ResponseCode::CarryOn) => s = CONFIG.time.sleep_min_s,
+                    Some(ResponseCode::Exit) => std::process::exit(0),
+                    Some(ResponseCode::SoftwareUpdate) => {
+                        println!("Software update");
+                        match download(ResponseCode::SoftwareUpdate).await {
+                            Err(_) => {
+                                eprintln!("Download failed. Let's continue as if nothing happened.")
+                            }
+                            Ok(_) => std::process::exit(0),
+                        }
+                    }
+                    _ => panic!("Unrecognized response code {r}"),
+                }
+            }
+        };
+    }
+    Ok(0)
+}
+
+
+async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
     let dbc = load_dbc_file(CONFIG.can.as_ref().unwrap().dbc_file.as_ref().unwrap())
         .expect("Failed to load DBC file");
 
@@ -257,30 +333,9 @@ async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, B
                     time_stamp: None, // The tokio_socketcan library currently lacks support for timestamps, but see https://github.com/socketcan-rs/socketcan-rs/issues/22
                     signal: can_signals.clone(),
                 };
-                match send_can_message(channel.clone(), can_message).await {
-                    Err(e) => {
-                        eprintln!("Error: {e}");
-                        eprintln!("Sleeping for {s}.{ms} s");
-                        task::sleep(Duration::from_millis(s * 1000 + ms)).await;
-                        s = std::cmp::min(s * 2, CONFIG.time.sleep_max_s);
-                    }
-                    Ok(r) => {
-                        match ResponseCode::from_i32(r) {
-                            Some(ResponseCode::CarryOn) => s = CONFIG.time.sleep_min_s,
-                            Some(ResponseCode::Exit) => std::process::exit(0),
-                            Some(ResponseCode::SoftwareUpdate) => {
-                                println!("Software update");
-                                match download(ResponseCode::SoftwareUpdate).await {
-                                    Err(_) => {
-                                        eprintln!("Download failed. Let's continue as if nothing happened.")
-                                    }
-                                    Ok(_) => std::process::exit(0),
-                                }
-                            }
-                            _ => panic!("Unrecognized response code {r}"),
-                        }
-                    }
-                }
+                let mut req_map = CAN_MSG_QUEUE.lock().unwrap();
+
+                req_map.push(can_message);
             }
         }
     }
@@ -521,14 +576,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         setup_can();
         let can_ports = CONFIG.can.clone().unwrap().ports.unwrap();
-        let mut can_monitor_futures = vec![can_monitor(&can_ports[0], channel.clone())];
+        let mut can_monitor_futures = vec![can_monitor(&can_ports[0])];
         for p in &can_ports[1..] {
-            can_monitor_futures.push(can_monitor(p, channel.clone()));
+            can_monitor_futures.push(can_monitor(p));
         }
-        match try_join3(
+        let sender_handle = can_sender(channel);
+        match try_join4(
             try_join_all(gpio_monitor_futures),
             try_join_all(can_monitor_futures),
             heartbeat_future,
+            sender_handle,
         )
         .await
         {
@@ -537,12 +594,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
     } else if CONFIG.can.is_some() {
         setup_can();
+        let sender_handle = can_sender(channel);
         let can_ports = CONFIG.can.clone().unwrap().ports.unwrap();
-        let mut can_monitor_futures = vec![can_monitor(&can_ports[0], channel.clone())];
+        let mut can_monitor_futures = vec![can_monitor(&can_ports[0])];
         for p in &can_ports[1..] {
-            can_monitor_futures.push(can_monitor(p, channel.clone()));
+            can_monitor_futures.push(can_monitor(p));
         }
-        match try_join(try_join_all(can_monitor_futures), heartbeat_future).await {
+        match try_join3(try_join_all(
+                            can_monitor_futures),
+                            heartbeat_future,
+                            sender_handle).await {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
