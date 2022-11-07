@@ -719,14 +719,19 @@ fn get_signed_number(
 ) -> Option<elevator::can_signal::Value> {
     let signed_mask = 1 << (signal_length - 1);
     let is_negative = (signed_mask & signal_value) != 0;
+
+    let max_val: u64 = 0xFFFFFFFFFFFFFFFF;
+    let two_compliment_64 = (max_val << signal_length) | signal_value;
+
     if is_negative {
         if is_float(signal_factor) || is_float(signal_offset) {
             return Some(elevator::can_signal::Value::ValF64(
-                ((signal_value & !signed_mask) as i64 * -1) as f64 * signal_factor + signal_offset,
+                ((two_compliment_64) as i64) as f64 * signal_factor + signal_offset,
             ));
         }
+
         return Some(elevator::can_signal::Value::ValI64(
-            ((signal_value & !signed_mask) as i64 * -1) * signal_factor as i64
+            two_compliment_64 as i64 * signal_factor as i64
                 + signal_offset as i64,
         ));
     }
@@ -778,7 +783,7 @@ async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
 }
 
 fn is_float(f: f64) -> bool {
-    f != f as u64 as f64
+    f != f as i64 as f64
 }
 
 fn get_signal_value(frame_value: u64, start_bit: u64, signal_size: u64) -> u64 {
