@@ -1,7 +1,7 @@
 use async_std::task;
-use can_dbc::{ByteOrder, SignalExtendedValueType};
+use can_dbc::{ByteOrder, SignalExtendedValueType, MultiplexIndicator};
 use elevator::elevator_client::ElevatorClient;
-use elevator::{CanMessage, CanSignal, Point, ResponseCode, Value, Values};
+use elevator::{CanMessage, CanSignal, Point, ResponseCode, Value, Values, can_signal};
 use futures::future::{try_join, try_join3, try_join_all};
 use futures::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
@@ -14,6 +14,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::process::Command;
 use std::str;
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio_socketcan::CANSocket;
 use tonic::{
@@ -152,6 +153,17 @@ fn load_dbc_file(s: &str) -> Result<can_dbc::DBC, Box<dyn Error>> {
     Ok(dbc)
 }
 
+// Checks if the last signal value sent is equal to supllied signal and value
+fn is_can_signal_duplicate(map: &HashMap<String, Option<can_signal::Value>>, name: &String, val: &Option<can_signal::Value>) -> bool {
+    if let Some(last_sent) = map.get_key_value(name) {
+        if Some(last_sent.1) == Some(val) {
+            return true;
+        }
+    }
+    false
+}
+
+
 async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
     let dbc = load_dbc_file(CONFIG.can.as_ref().unwrap().dbc_file.as_ref().unwrap())
         .expect("Failed to load DBC file");
@@ -159,6 +171,12 @@ async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, B
     // Add retries with backoff
     let mut s = CONFIG.time.sleep_min_s;
     let ms = rand::thread_rng().gen_range(0..=500);
+
+    let mut map = HashMap::new();
+    let mut prev_map = HashMap::new();
+    for message in dbc.messages() {
+        map.insert(message.message_id().0, message);
+    }
 
     let mut socket_rx = CANSocket::open(&port.name.clone())?;
     eprintln!("Start reading from {}", &port.name);
@@ -191,9 +209,17 @@ async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, B
                     let can_signal: CanSignal = CanSignal {
                         signal_name: signal.name().clone(),
                         unit: signal_unit,
-                        value: can_signal_value,
+                        value: can_signal_value.clone(),
                     };
+                    if is_can_signal_duplicate(&prev_map, &signal.name(), &can_signal_value) {
+                        continue;
+                    }
+                    *prev_map.entry(signal.name().clone()).or_insert(can_signal_value.clone()) = can_signal_value.clone();
                     can_signals.push(can_signal);
+                }
+
+                if can_signals.len() == 0 {
+                    continue;
                 }
 
                 let can_message: CanMessage = CanMessage {
