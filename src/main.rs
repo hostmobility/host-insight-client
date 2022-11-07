@@ -178,6 +178,11 @@ async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, B
         map.insert(message.message_id().0, message);
     }
 
+    let mut msg_map = HashMap::new();
+    for message in dbc.messages() {
+        msg_map.insert(message.message_id().0, message);
+    }
+
     let mut socket_rx = CANSocket::open(&port.name.clone())?;
     eprintln!("Start reading from {}", &port.name);
     if let Some(bitrate) = &port.bitrate {
@@ -185,13 +190,14 @@ async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, B
     }
 
     while let Some(frame) = socket_rx.next().await {
-        for message in dbc.messages() {
-            if frame.as_ref().unwrap().id() == message.message_id().0 {
+        match msg_map.get_key_value(&frame.as_ref().unwrap().id()) {
+            Some(message) => {
+            if frame.as_ref().unwrap().id() == message.1.message_id().0 {
                 let data = frame.as_ref().unwrap().data();
                 let mut can_signals: Vec<CanSignal> = Vec::new();
-                for signal in message.signals() {
+                for signal in message.1.signals() {
                     let can_signal_value =
-                        match get_can_signal_value(message.message_id(), data, signal, &dbc) {
+                        match get_can_signal_value(message.1.message_id(), data, signal, &dbc) {
                             Some(val) => Some(val),
                             // FIXME: Report an error to the server instead of just skipping the signal
                             None => continue,
@@ -252,6 +258,8 @@ async fn can_monitor(port: &CanPort, channel: Channel) -> Result<ResponseCode, B
                     }
                 }
             }
+        },
+        None =>  {},
         }
     }
 
