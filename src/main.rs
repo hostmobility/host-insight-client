@@ -1,24 +1,24 @@
 use async_std::task;
-use can_dbc::{ByteOrder, SignalExtendedValueType, MultiplexIndicator};
+use can_dbc::{ByteOrder, MultiplexIndicator, SignalExtendedValueType};
 use elevator::elevator_client::ElevatorClient;
-use elevator::{CanMessage, CanSignal, Point, ResponseCode, Value, Values, can_signal};
+use elevator::{can_signal, CanMessage, CanSignal, Point, ResponseCode, Value, Values};
 use futures::future::{try_join, try_join3, try_join4, try_join_all};
+use futures::stream;
 use futures::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
 use lazy_static::lazy_static;
 use rand::Rng;
 use serde_derive::Deserialize;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::fs::File;
 use std::io::prelude::*;
 use std::process::Command;
 use std::str;
-use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
-use tokio::time::{sleep};
-use futures::stream;
+use tokio::time::sleep;
 use tokio_socketcan::CANSocket;
 use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig},
@@ -34,8 +34,7 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref CAN_MSG_QUEUE: Mutex<Vec<CanMessage>> =
-    Mutex::new(Vec::new());
+    static ref CAN_MSG_QUEUE: Mutex<Vec<CanMessage>> = Mutex::new(Vec::new());
 }
 
 #[derive(Deserialize)]
@@ -176,7 +175,11 @@ fn load_dbc_file(s: &str) -> Result<can_dbc::DBC, Box<dyn Error>> {
 }
 
 // Checks if the last signal value sent is equal to supllied signal and value
-fn is_can_signal_duplicate(map: &HashMap<String, Option<can_signal::Value>>, name: &String, val: &Option<can_signal::Value>) -> bool {
+fn is_can_signal_duplicate(
+    map: &HashMap<String, Option<can_signal::Value>>,
+    name: &String,
+    val: &Option<can_signal::Value>,
+) -> bool {
     if let Some(last_sent) = map.get_key_value(name) {
         if Some(last_sent.1) == Some(val) {
             return true;
@@ -185,7 +188,7 @@ fn is_can_signal_duplicate(map: &HashMap<String, Option<can_signal::Value>>, nam
     false
 }
 
-async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>>  {
+async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>> {
     const MAX_MSG_TO_SEND: usize = 100;
 
     let mut s = CONFIG.time.sleep_min_s;
@@ -217,26 +220,23 @@ async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>>  {
                 task::sleep(Duration::from_millis(s * 1000 + ms)).await;
                 s = std::cmp::min(s * 2, CONFIG.time.sleep_max_s);
             }
-            Ok(r) => {
-                match ResponseCode::from_i32(r) {
-                    Some(ResponseCode::CarryOn) => s = CONFIG.time.sleep_min_s,
-                    Some(ResponseCode::Exit) => std::process::exit(0),
-                    Some(ResponseCode::SoftwareUpdate) => {
-                        println!("Software update");
-                        match download(ResponseCode::SoftwareUpdate).await {
-                            Err(_) => {
-                                eprintln!("Download failed. Let's continue as if nothing happened.")
-                            }
-                            Ok(_) => std::process::exit(0),
+            Ok(r) => match ResponseCode::from_i32(r) {
+                Some(ResponseCode::CarryOn) => s = CONFIG.time.sleep_min_s,
+                Some(ResponseCode::Exit) => std::process::exit(0),
+                Some(ResponseCode::SoftwareUpdate) => {
+                    println!("Software update");
+                    match download(ResponseCode::SoftwareUpdate).await {
+                        Err(_) => {
+                            eprintln!("Download failed. Let's continue as if nothing happened.")
                         }
+                        Ok(_) => std::process::exit(0),
                     }
-                    _ => panic!("Unrecognized response code {r}"),
                 }
-            }
+                _ => panic!("Unrecognized response code {r}"),
+            },
         };
     }
 }
-
 
 async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
     let dbc = load_dbc_file(CONFIG.can.as_ref().unwrap().dbc_file.as_ref().unwrap())
@@ -314,7 +314,9 @@ async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
                     if is_can_signal_duplicate(&prev_map, &signal.name(), &can_signal_value) {
                         continue;
                     }
-                    *prev_map.entry(signal.name().clone()).or_insert(can_signal_value.clone()) = can_signal_value.clone();
+                    *prev_map
+                        .entry(signal.name().clone())
+                        .or_insert(can_signal_value.clone()) = can_signal_value.clone();
                     can_signals.push(can_signal);
                 }
 
@@ -594,10 +596,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for p in &can_ports[1..] {
             can_monitor_futures.push(can_monitor(p));
         }
-        match try_join3(try_join_all(
-                            can_monitor_futures),
-                            heartbeat_future,
-                            sender_handle).await {
+        match try_join3(
+            try_join_all(can_monitor_futures),
+            heartbeat_future,
+            sender_handle,
+        )
+        .await
+        {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
@@ -727,21 +732,20 @@ fn get_can_signal_value(
     }
 }
 
-
 fn is_multiplexor(s: &can_dbc::Signal) -> bool {
     match s.multiplexer_indicator() {
         MultiplexIndicator::Multiplexor => {
             return true;
-        },
+        }
         MultiplexIndicator::MultiplexedSignal(_val) => {
             return false;
-        },
+        }
         MultiplexIndicator::MultiplexorAndMultiplexedSignal(_val) => {
             return false;
-        },
+        }
         MultiplexIndicator::Plain => {
             return false;
-        },
+        }
     }
 }
 
@@ -749,16 +753,16 @@ fn is_multiplexed(s: &can_dbc::Signal) -> bool {
     match s.multiplexer_indicator() {
         MultiplexIndicator::Multiplexor => {
             return false;
-        },
+        }
         MultiplexIndicator::MultiplexedSignal(_val) => {
             return true;
-        },
+        }
         MultiplexIndicator::MultiplexorAndMultiplexedSignal(_val) => {
             return false;
-        },
+        }
         MultiplexIndicator::Plain => {
             return false;
-        },
+        }
     }
 }
 
@@ -766,19 +770,18 @@ fn get_multiplex_val(s: &can_dbc::Signal) -> u64 {
     match s.multiplexer_indicator() {
         MultiplexIndicator::Multiplexor => {
             return 0;
-        },
+        }
         MultiplexIndicator::MultiplexedSignal(val) => {
             return *val;
-        },
+        }
         MultiplexIndicator::MultiplexorAndMultiplexedSignal(val) => {
             return *val;
-        },
+        }
         MultiplexIndicator::Plain => {
             return 0;
-        },
+        }
     }
 }
-
 
 #[derive(Debug)]
 enum SignalValueType {
@@ -897,8 +900,7 @@ fn get_signed_number(
         }
 
         return Some(elevator::can_signal::Value::ValI64(
-            two_compliment_64 as i64 * signal_factor as i64
-                + signal_offset as i64,
+            two_compliment_64 as i64 * signal_factor as i64 + signal_offset as i64,
         ));
     }
 
