@@ -1,5 +1,4 @@
-use async_std::sync::Mutex;
-use async_std::task;
+use async_std::{sync::Mutex, task};
 use can_dbc::{ByteOrder, MultiplexIndicator, SignalExtendedValueType};
 use elevator::elevator_client::ElevatorClient;
 use elevator::{can_signal, CanMessage, CanSignal, Point, ResponseCode, Value, Values};
@@ -13,7 +12,6 @@ use serde_derive::Deserialize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::fs::File;
 use std::io::prelude::*;
 use std::process::Command;
 use std::str;
@@ -167,7 +165,7 @@ fn load_dbc_file(s: &str) -> Result<can_dbc::DBC, Box<dyn Error>> {
         .expect("Path could not be found")
         .join(format!(".config/ada-client/{}", s));
 
-    let mut f = File::open(path)?;
+    let mut f = fs::File::open(path)?;
     let mut buffer = Vec::new();
     f.read_to_end(&mut buffer)?;
     let dbc = can_dbc::DBC::from_slice(&buffer).expect("Failed to parse dbc file");
@@ -285,23 +283,20 @@ async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
                     };
                     // If the signal is a multiplexor, store the value of that signal.
                     if is_multiplexor(signal) {
-                        if let Some(val_enum) = can_signal_value.clone() {
-                            if let can_signal::Value::ValU64(val) = val_enum {
-                                multiplex_val = val;
-                            }
+                        if let Some(can_signal::Value::ValU64(val)) = can_signal_value.clone() {
+                            multiplex_val = val;
                         }
                     }
+
                     // If the value is a multiplexed signal
                     // Check if the multiplex signal value matches the multiplexor value of this signal
                     // Else continue and discard the signal
                     // FIXME: This is dependent on that the multipexor signal is parsed firs in the for-loop.
                     // otherwise the multiplex_val variable will be 0
                     if is_multiplexed(signal) {
-                        if let Some(val_enum) = can_signal_value.clone() {
-                            if let can_signal::Value::ValU64(_) = val_enum {
-                                if multiplex_val != get_multiplex_val(signal) {
-                                    continue;
-                                }
+                        if let Some(can_signal::Value::ValU64(_)) = can_signal_value.clone() {
+                            if multiplex_val != get_multiplex_val(signal) {
+                                continue;
                             }
                         }
                     }
@@ -311,16 +306,16 @@ async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
                         unit: signal_unit,
                         value: can_signal_value.clone(),
                     };
-                    if is_can_signal_duplicate(&prev_map, &signal.name(), &can_signal_value) {
+                    if is_can_signal_duplicate(&prev_map, signal.name(), &can_signal_value) {
                         continue;
                     }
                     *prev_map
                         .entry(signal.name().clone())
-                        .or_insert(can_signal_value.clone()) = can_signal_value.clone();
+                        .or_insert_with(|| can_signal_value.clone()) = can_signal_value.clone();
                     can_signals.push(can_signal);
                 }
 
-                if can_signals.len() == 0 {
+                if can_signals.is_empty() {
                     continue;
                 }
 
@@ -734,52 +729,28 @@ fn get_can_signal_value(
 
 fn is_multiplexor(s: &can_dbc::Signal) -> bool {
     match s.multiplexer_indicator() {
-        MultiplexIndicator::Multiplexor => {
-            return true;
-        }
-        MultiplexIndicator::MultiplexedSignal(_val) => {
-            return false;
-        }
-        MultiplexIndicator::MultiplexorAndMultiplexedSignal(_val) => {
-            return false;
-        }
-        MultiplexIndicator::Plain => {
-            return false;
-        }
+        MultiplexIndicator::Multiplexor => true,
+        MultiplexIndicator::MultiplexedSignal(_val) => false,
+        MultiplexIndicator::MultiplexorAndMultiplexedSignal(_val) => false,
+        MultiplexIndicator::Plain => false,
     }
 }
 
 fn is_multiplexed(s: &can_dbc::Signal) -> bool {
     match s.multiplexer_indicator() {
-        MultiplexIndicator::Multiplexor => {
-            return false;
-        }
-        MultiplexIndicator::MultiplexedSignal(_val) => {
-            return true;
-        }
-        MultiplexIndicator::MultiplexorAndMultiplexedSignal(_val) => {
-            return false;
-        }
-        MultiplexIndicator::Plain => {
-            return false;
-        }
+        MultiplexIndicator::Multiplexor => false,
+        MultiplexIndicator::MultiplexedSignal(_val) => true,
+        MultiplexIndicator::MultiplexorAndMultiplexedSignal(_val) => false,
+        MultiplexIndicator::Plain => false,
     }
 }
 
 fn get_multiplex_val(s: &can_dbc::Signal) -> u64 {
     match s.multiplexer_indicator() {
-        MultiplexIndicator::Multiplexor => {
-            return 0;
-        }
-        MultiplexIndicator::MultiplexedSignal(val) => {
-            return *val;
-        }
-        MultiplexIndicator::MultiplexorAndMultiplexedSignal(val) => {
-            return *val;
-        }
-        MultiplexIndicator::Plain => {
-            return 0;
-        }
+        MultiplexIndicator::Multiplexor => 0,
+        MultiplexIndicator::MultiplexedSignal(val) => *val,
+        MultiplexIndicator::MultiplexorAndMultiplexedSignal(val) => *val,
+        MultiplexIndicator::Plain => 0,
     }
 }
 
