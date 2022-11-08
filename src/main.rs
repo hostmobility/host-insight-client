@@ -642,9 +642,12 @@ fn get_can_signal_value(
     s: &can_dbc::Signal,
     dbc: &can_dbc::DBC,
 ) -> Option<elevator::can_signal::Value> {
-    let frame_data: [u8; 8] = d
-        .try_into()
-        .expect("Failed to parse data slice as an array");
+    let mut frame_data: [u8; 8] = [0; 8];
+    if *s.byte_order() == ByteOrder::LittleEndian {
+        for (index, value) in d.iter().enumerate() {
+            frame_data[index] = *value;
+        }
+    }
 
     let frame_value: u64 = if *s.byte_order() == ByteOrder::LittleEndian {
         u64::from_le_bytes(frame_data)
