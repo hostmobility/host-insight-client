@@ -1,3 +1,4 @@
+use async_std::sync::Mutex;
 use async_std::task;
 use can_dbc::{ByteOrder, MultiplexIndicator, SignalExtendedValueType};
 use elevator::elevator_client::ElevatorClient;
@@ -16,7 +17,6 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::process::Command;
 use std::str;
-use std::sync::Mutex;
 use std::time::Duration;
 use tokio::time::sleep;
 use tokio_socketcan::CANSocket;
@@ -196,7 +196,7 @@ async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>> {
     loop {
         let mut vec = Vec::new();
 
-        let mut req_map = CAN_MSG_QUEUE.lock().unwrap();
+        let mut req_map = CAN_MSG_QUEUE.lock().await;
 
         let len = req_map.len();
 
@@ -329,7 +329,7 @@ async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
                     time_stamp: None, // The tokio_socketcan library currently lacks support for timestamps, but see https://github.com/socketcan-rs/socketcan-rs/issues/22
                     signal: can_signals.clone(),
                 };
-                let mut req_map = CAN_MSG_QUEUE.lock().unwrap();
+                let mut req_map = CAN_MSG_QUEUE.lock().await;
 
                 req_map.push(can_message);
             }
