@@ -6,7 +6,6 @@ use futures::future::{try_join, try_join3, try_join4, try_join_all};
 use futures::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
 use lazy_static::lazy_static;
-use libc::{FALLOC_FL_KEEP_SIZE, size_t};
 use rand::Rng;
 use serde_derive::Deserialize;
 use std::error::Error;
@@ -134,7 +133,7 @@ async fn send_can_message_stream(
     Ok(response.into_inner().rc)
 }
 
-
+#[allow(dead_code)]
 async fn send_can_message(
     channel: Channel,
     can_message: CanMessage,
@@ -187,7 +186,7 @@ fn is_can_signal_duplicate(map: &HashMap<String, Option<can_signal::Value>>, nam
 }
 
 async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>>  {
-    const MAX_MSG_TO_SEND: size_t = 100;
+    const MAX_MSG_TO_SEND: usize = 100;
 
     let mut s = CONFIG.time.sleep_min_s;
     let ms = rand::thread_rng().gen_range(0..=500);
@@ -204,9 +203,9 @@ async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>>  {
             continue;
         } else {
             if len > MAX_MSG_TO_SEND {
-                vec = req_map.drain(0..MAX_MSG_TO_SEND).collect();
+                vec.extend(req_map.drain(..MAX_MSG_TO_SEND));
             } else {
-                vec = req_map.drain(0..len).collect();
+                vec.extend(req_map.drain(..));
             }
             drop(req_map);
         }
@@ -236,17 +235,12 @@ async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>>  {
             }
         };
     }
-    Ok(0)
 }
 
 
 async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
     let dbc = load_dbc_file(CONFIG.can.as_ref().unwrap().dbc_file.as_ref().unwrap())
         .expect("Failed to load DBC file");
-
-    // Add retries with backoff
-    let mut s = CONFIG.time.sleep_min_s;
-    let ms = rand::thread_rng().gen_range(0..=500);
 
     let mut map = HashMap::new();
     let mut prev_map = HashMap::new();
@@ -304,7 +298,7 @@ async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
                     // otherwise the multiplex_val variable will be 0
                     if is_multiplexed(signal) {
                         if let Some(val_enum) = can_signal_value.clone() {
-                            if let can_signal::Value::ValU64(val) = val_enum {
+                            if let can_signal::Value::ValU64(_) = val_enum {
                                 if multiplex_val != get_multiplex_val(signal) {
                                     continue;
                                 }
@@ -736,16 +730,16 @@ fn get_can_signal_value(
 
 fn is_multiplexor(s: &can_dbc::Signal) -> bool {
     match s.multiplexer_indicator() {
-        can_dbc::MultiplexIndicator::Multiplexor => {
+        MultiplexIndicator::Multiplexor => {
             return true;
         },
-        can_dbc::MultiplexIndicator::MultiplexedSignal(val) => {
+        MultiplexIndicator::MultiplexedSignal(_val) => {
             return false;
         },
-        can_dbc::MultiplexIndicator::MultiplexorAndMultiplexedSignal(val) => {
+        MultiplexIndicator::MultiplexorAndMultiplexedSignal(_val) => {
             return false;
         },
-        can_dbc::MultiplexIndicator::Plain => {
+        MultiplexIndicator::Plain => {
             return false;
         },
     }
@@ -753,16 +747,16 @@ fn is_multiplexor(s: &can_dbc::Signal) -> bool {
 
 fn is_multiplexed(s: &can_dbc::Signal) -> bool {
     match s.multiplexer_indicator() {
-        can_dbc::MultiplexIndicator::Multiplexor => {
+        MultiplexIndicator::Multiplexor => {
             return false;
         },
-        can_dbc::MultiplexIndicator::MultiplexedSignal(val) => {
+        MultiplexIndicator::MultiplexedSignal(_val) => {
             return true;
         },
-        can_dbc::MultiplexIndicator::MultiplexorAndMultiplexedSignal(val) => {
+        MultiplexIndicator::MultiplexorAndMultiplexedSignal(_val) => {
             return false;
         },
-        can_dbc::MultiplexIndicator::Plain => {
+        MultiplexIndicator::Plain => {
             return false;
         },
     }
@@ -770,16 +764,16 @@ fn is_multiplexed(s: &can_dbc::Signal) -> bool {
 
 fn get_multiplex_val(s: &can_dbc::Signal) -> u64 {
     match s.multiplexer_indicator() {
-        can_dbc::MultiplexIndicator::Multiplexor => {
+        MultiplexIndicator::Multiplexor => {
             return 0;
         },
-        can_dbc::MultiplexIndicator::MultiplexedSignal(val) => {
+        MultiplexIndicator::MultiplexedSignal(val) => {
             return *val;
         },
-        can_dbc::MultiplexIndicator::MultiplexorAndMultiplexedSignal(val) => {
+        MultiplexIndicator::MultiplexorAndMultiplexedSignal(val) => {
             return *val;
         },
-        can_dbc::MultiplexIndicator::Plain => {
+        MultiplexIndicator::Plain => {
             return 0;
         },
     }
