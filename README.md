@@ -29,7 +29,8 @@ The following signal values are supported:
 - floats including from extended value type list
 - strings (enums) from value descriptions
 
-CAN timestamps are not yet implemented.
+CAN timestamps are not yet implemented. There is experimental support
+for multiplexed signals.
 
 ## Digital in
 
@@ -54,8 +55,8 @@ lines = [5, 6, 7, 8, 9, 10] # Digital in 0--5 on MX-V PT
 offset = 5 # Send values as lines numbers minus the offset, 5 - 5 = 0, 6 - 5 = 1, etc.
 
 [can]
-ports = [ { name = "can0", bitrate = 125000, read_only = true  },
-          { name = "can1", bitrate = 500000, read_only = false } ]
+ports = [ { name = "can0", bitrate = 125000, listen_only = true  },
+          { name = "can1", bitrate = 500000, listen_only = false } ]
 dbc_file = "sample.dbc"
 
 [time]
@@ -73,12 +74,40 @@ latitude = 57.674
 
 ## Building for ARM32 on Debian GNU/Linux
 
-TODO: add required packages
+Install build dependencies:
 
-Run the following commands:
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup target add armv7-unknown-linux-gnueabihf
+sudo apt install gcc-arm-linux-gnueabihf linux-libc-dev-armhf-cross
+```
+
+Use ARMv7 linker:
 
 ```
 export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=/usr/bin/arm-linux-gnueabihf-gcc
+```
 
-cargo build --release --target=armv7-unknown-linux-gnueabihf
+Build:
+
+```
+cargo build --target=armv7-unknown-linux-gnueabihf --release
+```
+
+## Systemd example service
+
+```
+[Unit]
+Description=Ada client service
+
+[Service]
+Restart=always
+WorkingDirectory=/home/root/
+RestartSec=10
+User=root
+Environment="HOME=/home/root/"
+ExecStart=/opt/ada-client/ada-client
+
+[Install]
+WantedBy=multi-user.target
 ```
