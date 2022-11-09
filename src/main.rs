@@ -286,6 +286,7 @@ async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
                         if let Some(can_signal::Value::ValU64(val)) = can_signal_value.clone() {
                             multiplex_val = val;
                         }
+                        continue;
                     }
 
                     // If the value is a multiplexed signal
