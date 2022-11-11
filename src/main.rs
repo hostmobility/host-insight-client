@@ -35,6 +35,8 @@ lazy_static! {
     static ref CAN_MSG_QUEUE: Mutex<Vec<CanMessage>> = Mutex::new(Vec::new());
 }
 
+pub const GIT_COMMIT_DESCRIBE: &str = env!("GIT_VERSION");
+
 #[derive(Deserialize)]
 struct Config {
     uid: String,
@@ -550,6 +552,7 @@ fn load_config() -> Config {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Starting ada-client {}", GIT_COMMIT_DESCRIBE);
     let channel = setup_server().await;
 
     // Get and send initial GPIO values
