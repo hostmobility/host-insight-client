@@ -41,7 +41,7 @@ pub const GIT_COMMIT_DESCRIBE: &str = env!("GIT_VERSION");
 struct Config {
     uid: String,
     can: Option<CanConfig>,
-    gpio: Option<GpioConfig>,
+    digital_in: Option<DigitalInConfig>,
     server: ServerConfig,
     time: Time,
     position: GpsData,
@@ -53,7 +53,7 @@ struct ServerConfig {
 }
 
 #[derive(Deserialize, Clone)]
-struct GpioConfig {
+struct DigitalInConfig {
     chip: Option<String>,
     lines: Option<Vec<u32>>,
     offset: Option<u32>,
@@ -336,14 +336,19 @@ async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
     Ok(ResponseCode::Exit)
 }
 
-async fn gpio_monitor(
-    gpio_n: u32,
-    //gpio_values: &HashMap<String, bool>,
+async fn digital_in_monitor(
+    digital_in_n: u32,
+    //digital_in_values: &HashMap<String, bool>,
     channel: Channel,
 ) -> Result<ResponseCode, Box<dyn Error>> {
-    let mut chip = Chip::new(CONFIG.gpio.clone().unwrap().chip.unwrap())?;
-    let line = chip.get_line(gpio_n)?;
-    let line_offset = CONFIG.gpio.clone().unwrap().offset.unwrap_or_default();
+    let mut chip = Chip::new(CONFIG.digital_in.clone().unwrap().chip.unwrap())?;
+    let line = chip.get_line(digital_in_n)?;
+    let line_offset = CONFIG
+        .digital_in
+        .clone()
+        .unwrap()
+        .offset
+        .unwrap_or_default();
 
     let mut events = AsyncLineEventHandle::new(line.events(
         LineRequestFlags::INPUT,
@@ -358,7 +363,7 @@ async fn gpio_monitor(
     while let Some(event) = events.next().await {
         match send_value(
             channel.clone(),
-            &format!("Digital {}", gpio_n - line_offset),
+            &format!("Digital {}", digital_in_n - line_offset),
             event?.event_type() == EventType::RisingEdge,
         )
         .await
@@ -388,14 +393,14 @@ async fn gpio_monitor(
     Ok(ResponseCode::Exit)
 }
 
-async fn send_initial_values(channel: Channel, initial_gpio_vals: &Option<Vec<u8>>) {
+async fn send_initial_values(channel: Channel, initial_digital_in_vals: &Option<Vec<u8>>) {
     // Add retries with backoff
     let mut s = CONFIG.time.sleep_min_s;
     let ms = rand::thread_rng().gen_range(0..=500);
 
     loop {
-        if initial_gpio_vals.is_some() {
-            for (i, elem) in initial_gpio_vals.clone().unwrap().iter().enumerate() {
+        if initial_digital_in_vals.is_some() {
+            for (i, elem) in initial_digital_in_vals.clone().unwrap().iter().enumerate() {
                 match send_value(channel.clone(), &format!("Digital {}", i), *elem != 0).await {
                     Err(e) => {
                         eprintln!("Error: {e}");
@@ -555,18 +560,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting ada-client {}", GIT_COMMIT_DESCRIBE);
     let channel = setup_server().await;
 
-    // Get and send initial GPIO values
-    let initial_gpio_vals: Option<Vec<u8>> = read_all().await;
-    send_initial_values(channel.clone(), &initial_gpio_vals).await;
+    // Get and send initial Digital IN values
+    let initial_digital_in_vals: Option<Vec<u8>> = read_all().await;
+    send_initial_values(channel.clone(), &initial_digital_in_vals).await;
 
     let heartbeat_future = heartbeat(channel.clone());
 
     // TODO: refactor this ugly part
-    if initial_gpio_vals.is_some() && CONFIG.can.is_some() {
-        let lines = CONFIG.gpio.clone().unwrap().lines.unwrap();
-        let mut gpio_monitor_futures = vec![gpio_monitor(lines[0], channel.clone())];
+    if initial_digital_in_vals.is_some() && CONFIG.can.is_some() {
+        let lines = CONFIG.digital_in.clone().unwrap().lines.unwrap();
+        let mut digital_in_monitor_futures = vec![digital_in_monitor(lines[0], channel.clone())];
         for l in &lines[1..] {
-            gpio_monitor_futures.push(gpio_monitor(*l, channel.clone()));
+            digital_in_monitor_futures.push(digital_in_monitor(*l, channel.clone()));
         }
 
         setup_can();
@@ -577,7 +582,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let sender_handle = can_sender(channel);
         match try_join4(
-            try_join_all(gpio_monitor_futures),
+            try_join_all(digital_in_monitor_futures),
             try_join_all(can_monitor_futures),
             heartbeat_future,
             sender_handle,
@@ -605,19 +610,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
-    } else if initial_gpio_vals.is_some() {
-        let lines = CONFIG.gpio.clone().unwrap().lines.unwrap();
-        let mut gpio_monitor_futures = vec![gpio_monitor(lines[0], channel.clone())];
+    } else if initial_digital_in_vals.is_some() {
+        let lines = CONFIG.digital_in.clone().unwrap().lines.unwrap();
+        let mut digital_in_monitor_futures = vec![digital_in_monitor(lines[0], channel.clone())];
         for l in &lines[1..] {
-            gpio_monitor_futures.push(gpio_monitor(*l, channel.clone()));
+            digital_in_monitor_futures.push(digital_in_monitor(*l, channel.clone()));
         }
 
-        match try_join(try_join_all(gpio_monitor_futures), heartbeat_future).await {
+        match try_join(try_join_all(digital_in_monitor_futures), heartbeat_future).await {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
     } else {
-        eprintln!("Invalid configuration. You need to specify at least one of the following I/Os: gpio, can");
+        eprintln!("Invalid configuration. You need to specify at least one of the following data sources: digital_in, can");
     }
 
     Ok(())
@@ -661,8 +666,8 @@ async fn heartbeat(channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
 }
 
 async fn read_all() -> Option<Vec<u8>> {
-    let chip = CONFIG.gpio.as_ref()?.clone().chip;
-    let lines = CONFIG.gpio.as_ref()?.clone().lines;
+    let chip = CONFIG.digital_in.as_ref()?.clone().chip;
+    let lines = CONFIG.digital_in.as_ref()?.clone().lines;
 
     match (chip, lines) {
         (Some(chip), Some(lines)) => {
@@ -681,7 +686,7 @@ async fn read_all() -> Option<Vec<u8>> {
                         .request(LineRequestFlags::INPUT, &vec![0; lines.len()], "multiread")
                         .unwrap();
                     let values = handle.get_values().unwrap();
-                    eprintln!("Initial GPIO values: {:?}", values);
+                    eprintln!("Initial Digital IN values: {:?}", values);
                     Some(values)
                 }
             }
