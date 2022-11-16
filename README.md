@@ -20,6 +20,12 @@ The following responses can be handled:
 - Config update: download a new configuration file for the client
 - Exit: terminate the application with exit code success
 
+Host requirements:
+
+- CAN bus and/or digital inputs
+- glibc v2.28 or later
+- OpenSSL
+
 ## CAN
 
 The following signal values are supported:
