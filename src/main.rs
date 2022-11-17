@@ -54,9 +54,13 @@ struct ServerConfig {
 
 #[derive(Deserialize, Clone)]
 struct DigitalInConfig {
-    chip: Option<String>,
-    lines: Option<Vec<u32>>,
-    offset: Option<u32>,
+    ports: Option<Vec<DigitalInPort>>,
+}
+
+#[derive(Deserialize, Clone)]
+struct DigitalInPort {
+    internal_name: String,
+    external_name: String,
 }
 
 #[derive(Deserialize, Clone)]
@@ -337,71 +341,71 @@ async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
 }
 
 async fn digital_in_monitor(
-    digital_in_n: u32,
-    //digital_in_values: &HashMap<String, bool>,
+    port: &DigitalInPort,
     channel: Channel,
 ) -> Result<ResponseCode, Box<dyn Error>> {
-    let mut chip = Chip::new(CONFIG.digital_in.clone().unwrap().chip.unwrap())?;
-    let line = chip.get_line(digital_in_n)?;
-    let line_offset = CONFIG
-        .digital_in
-        .clone()
-        .unwrap()
-        .offset
-        .unwrap_or_default();
+    if let Some((chip_name, line_number)) = get_digital_in_chip_and_line(port) {
+        let mut chip = Chip::new(chip_name)?;
+        let line = chip.get_line(line_number)?;
 
-    let mut events = AsyncLineEventHandle::new(line.events(
-        LineRequestFlags::INPUT,
-        EventRequestFlags::BOTH_EDGES,
-        "gpioevents",
-    )?)?;
+        let mut events = AsyncLineEventHandle::new(line.events(
+            LineRequestFlags::INPUT,
+            EventRequestFlags::BOTH_EDGES,
+            "gpioevents",
+        )?)?;
 
-    // Add retries with backoff
-    let mut s = CONFIG.time.sleep_min_s;
-    let ms = rand::thread_rng().gen_range(0..=500);
+        // Add retries with backoff
+        let mut s = CONFIG.time.sleep_min_s;
+        let ms = rand::thread_rng().gen_range(0..=500);
 
-    while let Some(event) = events.next().await {
-        match send_value(
-            channel.clone(),
-            &format!("Digital {}", digital_in_n - line_offset),
-            event?.event_type() == EventType::RisingEdge,
-        )
-        .await
-        {
-            Err(e) => {
-                eprintln!("Error: {e}");
-                eprintln!("Sleeping for {s}.{ms} s");
-                task::sleep(Duration::from_millis(s * 1000 + ms)).await;
-                s = std::cmp::min(s * 2, CONFIG.time.sleep_max_s);
-            }
-            Ok(r) => match ResponseCode::from_i32(r) {
-                Some(ResponseCode::CarryOn) => s = CONFIG.time.sleep_min_s,
-                Some(ResponseCode::Exit) => std::process::exit(0),
-                Some(ResponseCode::SoftwareUpdate) => {
-                    println!("Software update");
-                    match download(ResponseCode::SoftwareUpdate).await {
-                        Err(_) => {
-                            eprintln!("Download failed. Let's continue as if nothing happened.")
-                        }
-                        Ok(_) => std::process::exit(0),
-                    }
+        while let Some(event) = events.next().await {
+            match send_value(
+                channel.clone(),
+                &port.external_name,
+                event?.event_type() == EventType::RisingEdge,
+            )
+            .await
+            {
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    eprintln!("Sleeping for {s}.{ms} s");
+                    task::sleep(Duration::from_millis(s * 1000 + ms)).await;
+                    s = std::cmp::min(s * 2, CONFIG.time.sleep_max_s);
                 }
-                _ => panic!("Unrecognized response code {r}"),
-            },
+                Ok(r) => match ResponseCode::from_i32(r) {
+                    Some(ResponseCode::CarryOn) => s = CONFIG.time.sleep_min_s,
+                    Some(ResponseCode::Exit) => std::process::exit(0),
+                    Some(ResponseCode::SoftwareUpdate) => {
+                        println!("Software update");
+                        match download(ResponseCode::SoftwareUpdate).await {
+                            Err(_) => {
+                                eprintln!("Download failed. Let's continue as if nothing happened.")
+                            }
+                            Ok(_) => std::process::exit(0),
+                        }
+                    }
+                    _ => panic!("Unrecognized response code {r}"),
+                },
+            }
         }
+        Ok(ResponseCode::Exit)
+    } else {
+        Err("Could not find {chip_name} or {line number}")?
     }
-    Ok(ResponseCode::Exit)
 }
 
-async fn send_initial_values(channel: Channel, initial_digital_in_vals: &Option<Vec<u8>>) {
+async fn send_initial_values(
+    channel: Channel,
+    initial_digital_in_vals: Option<HashMap<String, u8>>,
+) {
     // Add retries with backoff
     let mut s = CONFIG.time.sleep_min_s;
     let ms = rand::thread_rng().gen_range(0..=500);
 
     loop {
         if initial_digital_in_vals.is_some() {
-            for (i, elem) in initial_digital_in_vals.clone().unwrap().iter().enumerate() {
-                match send_value(channel.clone(), &format!("Digital {}", i), *elem != 0).await {
+            for (key, val) in initial_digital_in_vals.clone().unwrap() {
+                match send_value(channel.clone(), &key, val != 0).await {
                     Err(e) => {
                         eprintln!("Error: {e}");
                         eprintln!("Sleeping for {s}.{ms} s");
@@ -561,17 +565,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let channel = setup_server().await;
 
     // Get and send initial Digital IN values
-    let initial_digital_in_vals: Option<Vec<u8>> = read_all().await;
-    send_initial_values(channel.clone(), &initial_digital_in_vals).await;
+    let initial_digital_in_vals: Option<HashMap<String, u8>> = read_all_digital_in().await;
+    send_initial_values(channel.clone(), initial_digital_in_vals).await;
 
     let heartbeat_future = heartbeat(channel.clone());
 
     // TODO: refactor this ugly part
-    if initial_digital_in_vals.is_some() && CONFIG.can.is_some() {
-        let lines = CONFIG.digital_in.clone().unwrap().lines.unwrap();
-        let mut digital_in_monitor_futures = vec![digital_in_monitor(lines[0], channel.clone())];
-        for l in &lines[1..] {
-            digital_in_monitor_futures.push(digital_in_monitor(*l, channel.clone()));
+    if CONFIG.digital_in.is_some() && CONFIG.can.is_some() {
+        let digital_in_ports = CONFIG.digital_in.clone().unwrap().ports.unwrap();
+        let mut digital_in_monitor_futures =
+            vec![digital_in_monitor(&digital_in_ports[0], channel.clone())];
+        for p in &digital_in_ports[1..] {
+            digital_in_monitor_futures.push(digital_in_monitor(p, channel.clone()));
         }
 
         setup_can();
@@ -610,11 +615,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
-    } else if initial_digital_in_vals.is_some() {
-        let lines = CONFIG.digital_in.clone().unwrap().lines.unwrap();
-        let mut digital_in_monitor_futures = vec![digital_in_monitor(lines[0], channel.clone())];
-        for l in &lines[1..] {
-            digital_in_monitor_futures.push(digital_in_monitor(*l, channel.clone()));
+    } else if CONFIG.digital_in.is_some() {
+        let digital_in_ports = CONFIG.digital_in.clone().unwrap().ports.unwrap();
+        let mut digital_in_monitor_futures =
+            vec![digital_in_monitor(&digital_in_ports[0], channel.clone())];
+        for p in &digital_in_ports[1..] {
+            digital_in_monitor_futures.push(digital_in_monitor(p, channel.clone()));
         }
 
         match try_join(try_join_all(digital_in_monitor_futures), heartbeat_future).await {
@@ -665,33 +671,54 @@ async fn heartbeat(channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
     }
 }
 
-async fn read_all() -> Option<Vec<u8>> {
-    let chip = CONFIG.digital_in.as_ref()?.clone().chip;
-    let lines = CONFIG.digital_in.as_ref()?.clone().lines;
+fn get_digital_in_chip_and_line(port: &DigitalInPort) -> Option<(String, u32)> {
+    let chip_iterator = match gpio_cdev::chips() {
+        Ok(chips) => chips,
+        Err(e) => {
+            println!("Failed to get chip iterator: {:?}", e);
+            return None;
+        }
+    };
 
-    match (chip, lines) {
-        (Some(chip), Some(lines)) => {
-            let chip = Chip::new(chip);
-            if chip.is_err() {
-                eprintln!("Error {:?}", chip.err());
-                None
-            } else {
-                let l = chip.unwrap().get_lines(&lines);
-                if l.is_err() {
-                    eprintln!("Error {:?}", l.err());
-                    None
-                } else {
-                    let handle = l
-                        .unwrap()
-                        .request(LineRequestFlags::INPUT, &vec![0; lines.len()], "multiread")
-                        .unwrap();
-                    let values = handle.get_values().unwrap();
-                    eprintln!("Initial Digital IN values: {:?}", values);
-                    Some(values)
+    for chip in chip_iterator.flatten() {
+        for line in chip.lines() {
+            match line.info() {
+                Ok(info) => {
+                    if info.name().unwrap_or("unused") == port.internal_name {
+                        let c = format!("/dev/{}", chip.name());
+                        let l: u32 = info.line().offset();
+                        return Some((c, l));
+                    }
                 }
+                _ => return None,
             }
         }
-        _ => None,
+    }
+    None
+}
+
+// Get some HashMap of <external name, value> or None
+async fn read_all_digital_in() -> Option<HashMap<String, u8>> {
+    let mut external_name_values = HashMap::new();
+
+    for (i, p) in CONFIG.digital_in.as_ref()?.clone().ports.iter().enumerate() {
+        if let Some((chip_name, line)) = get_digital_in_chip_and_line(&p[i]) {
+            if let Ok(mut chip) = Chip::new(chip_name) {
+                let handle = chip
+                    .get_line(line)
+                    .unwrap()
+                    .request(LineRequestFlags::INPUT, 0, "read-input")
+                    .unwrap();
+                external_name_values
+                    .insert(p[i].external_name.clone(), handle.get_value().unwrap());
+            }
+        }
+    }
+
+    if external_name_values.is_empty() {
+        None
+    } else {
+        Some(external_name_values)
     }
 }
 
