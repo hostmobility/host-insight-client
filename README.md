@@ -40,10 +40,9 @@ for multiplexed signals.
 
 ## Digital in
 
-Digital inputs are fetched from pre-defined line numbers on a
-gpiochip, e.g. [5, 6, 7, 8, 9, 10]. The signal source is defined as
-"Digital {line number - offset}". If the offset is 5, then the digital
-inputs become identified as [0, 1, 2, 3, 4, 5]. The value is a bool.
+Each digital input is given both an internal and an external name. The
+former is used for finding an existing port on the device and the
+latter for communicating a function to the server.
 
 ## Example configuration
 
@@ -55,10 +54,11 @@ Example configuration that enables six digital-in and two CAN ports:
 ```
 uid = "42"
 
-[gpio]
-chip = "/dev/gpiochip10"
-lines = [5, 6, 7, 8, 9, 10] # Digital in 0--5 on MX-V PT
-offset = 5 # Send values as lines numbers minus the offset, 5 - 5 = 0, 6 - 5 = 1, etc.
+[digital_in]
+ports = [ { internal_name = "digital-in-0", external_name = "Door" },
+          { internal_name = "digital-in-1", external_name = "Light" },
+          { internal_name = "digital-in-2", external_name = "Finger protection" }]
+
 
 [can]
 ports = [ { name = "can0", bitrate = 125000, listen_only = true  },
