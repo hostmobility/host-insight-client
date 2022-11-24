@@ -42,6 +42,7 @@ struct Config {
     uid: String,
     can: Option<CanConfig>,
     digital_in: Option<DigitalInConfig>,
+    digital_out: Option<DigitalOutConfig>,
     server: ServerConfig,
     time: Time,
     position: GpsData,
@@ -61,6 +62,18 @@ struct DigitalInConfig {
 struct DigitalInPort {
     internal_name: String,
     external_name: String,
+}
+
+#[derive(Deserialize, Clone)]
+struct DigitalOutConfig {
+    ports: Option<Vec<DigitalOutPort>>,
+}
+
+#[derive(Deserialize, Clone)]
+struct DigitalOutPort {
+    internal_name: String,
+    external_name: String,
+    default_state: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -343,7 +356,7 @@ async fn digital_in_monitor(
     port: &DigitalInPort,
     channel: Channel,
 ) -> Result<ResponseCode, Box<dyn Error>> {
-    if let Some((chip_name, line_number)) = get_digital_in_chip_and_line(port) {
+    if let Some((chip_name, line_number)) = get_digital_chip_and_line(&port.internal_name) {
         let mut chip = Chip::new(chip_name)?;
         let line = chip.get_line(line_number)?;
 
@@ -378,6 +391,31 @@ async fn send_initial_values(
     }
     // Send GPS position
     send_point(channel.clone()).await;
+}
+
+fn set_all_digital_out_to_defaults() -> Result<(), gpio_cdev::Error> {
+    for (i, p) in CONFIG.digital_out.clone().unwrap().ports.iter().enumerate() {
+        if let Some((chip_name, line)) = get_digital_chip_and_line(&p[i].internal_name) {
+            if let Ok(mut chip) = Chip::new(chip_name) {
+                let handle = chip
+                    .get_line(line)
+                    .unwrap()
+                    .request(
+                        LineRequestFlags::OUTPUT,
+                        0,
+                        "set_all_digital_out_to_defaults",
+                    )
+                    .unwrap();
+
+                let internal_name = &p[i].internal_name;
+                let external_name = &p[i].external_name;
+                let default_state = p[i].default_state;
+                handle.set_value(default_state as u8)?;
+                eprintln!("{internal_name} ({external_name} set to default state {default_state}.");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn setup_can() {
@@ -468,6 +506,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting ada-client {}", GIT_COMMIT_DESCRIBE);
     let channel = setup_server().await;
 
+    if CONFIG.digital_out.is_some() {
+        set_all_digital_out_to_defaults()?;
+    }
+
     // Get and send initial Digital IN values
     let initial_digital_in_vals: Option<HashMap<String, u8>> = read_all_digital_in().await;
     send_initial_values(channel.clone(), initial_digital_in_vals).await;
@@ -550,7 +592,7 @@ async fn heartbeat(channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
     }
 }
 
-fn get_digital_in_chip_and_line(port: &DigitalInPort) -> Option<(String, u32)> {
+fn get_digital_chip_and_line(internal_port_name: &str) -> Option<(String, u32)> {
     let chip_iterator = match gpio_cdev::chips() {
         Ok(chips) => chips,
         Err(e) => {
@@ -563,7 +605,7 @@ fn get_digital_in_chip_and_line(port: &DigitalInPort) -> Option<(String, u32)> {
         for line in chip.lines() {
             match line.info() {
                 Ok(info) => {
-                    if info.name().unwrap_or("unused") == port.internal_name {
+                    if info.name().unwrap_or("unused") == internal_port_name {
                         let c = format!("/dev/{}", chip.name());
                         let l: u32 = info.line().offset();
                         return Some((c, l));
@@ -581,7 +623,7 @@ async fn read_all_digital_in() -> Option<HashMap<String, u8>> {
     let mut external_name_values = HashMap::new();
 
     for (i, p) in CONFIG.digital_in.as_ref()?.clone().ports.iter().enumerate() {
-        if let Some((chip_name, line)) = get_digital_in_chip_and_line(&p[i]) {
+        if let Some((chip_name, line)) = get_digital_chip_and_line(&p[i].internal_name) {
             if let Ok(mut chip) = Chip::new(chip_name) {
                 let handle = chip
                     .get_line(line)
