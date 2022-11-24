@@ -49,7 +49,7 @@ latter for communicating a function to the server.
 The application will look for a conf.toml file firstly in
 ~/.config/ada-client/ and secondly in /etc/opt/ada-client/.
 
-Example configuration that enables six digital-in and two CAN ports:
+Example configuration that enables three digital-in and two CAN ports:
 
 ```
 uid = "42"
@@ -67,7 +67,7 @@ dbc_file = "sample.dbc"
 
 [time]
 sleep_min_s = 1
-sleep_max_s = 36000
+sleep_max_s = 10
 heartbeat_m = 60
 
 [server]
