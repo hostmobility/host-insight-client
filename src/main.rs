@@ -108,7 +108,7 @@ async fn handle_send_result(r: Result<Response<elevator::Reply>, Status>) -> Res
             eprintln!("Error: {e}");
             let s = rand::thread_rng().gen_range(CONFIG.time.sleep_min_s..=CONFIG.time.sleep_max_s);
             eprintln!("Sleeping for {s} s");
-            task::sleep(Duration::from_millis(s)).await;
+            task::sleep(Duration::from_secs(s)).await;
             return Err(e);
         }
     }
