@@ -2,7 +2,7 @@ use async_std::{sync::Mutex, task};
 use can_dbc::{ByteOrder, MultiplexIndicator, SignalExtendedValueType};
 use elevator::elevator_client::ElevatorClient;
 use elevator::{can_signal, CanMessage, CanSignal, Point, ResponseCode, Value, Values};
-use futures::future::{try_join, try_join3, try_join4, try_join_all};
+use futures::future::try_join_all;
 use futures::stream;
 use futures::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
@@ -490,14 +490,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             can_monitor_futures.push(can_monitor(p));
         }
         let sender_handle = can_sender(channel);
-        match try_join4(
+        match tokio::try_join!(
             try_join_all(digital_in_monitor_futures),
             try_join_all(can_monitor_futures),
             heartbeat_future,
             sender_handle,
-        )
-        .await
-        {
+        ) {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
@@ -509,13 +507,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for p in &can_ports[1..] {
             can_monitor_futures.push(can_monitor(p));
         }
-        match try_join3(
+        match tokio::try_join!(
             try_join_all(can_monitor_futures),
             heartbeat_future,
             sender_handle,
-        )
-        .await
-        {
+        ) {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
@@ -527,7 +523,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             digital_in_monitor_futures.push(digital_in_monitor(p, channel.clone()));
         }
 
-        match try_join(try_join_all(digital_in_monitor_futures), heartbeat_future).await {
+        match tokio::try_join!(try_join_all(digital_in_monitor_futures), heartbeat_future) {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
