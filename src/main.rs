@@ -108,11 +108,21 @@ fn intercept(mut req: Request<()>) -> Result<Request<()>, Status> {
     Ok(req)
 }
 
+fn clean_up() {
+    if CONFIG.digital_out.is_some() {
+        set_all_digital_out_to_defaults()
+            .expect("Failed to set all digital outs to their default values.");
+    }
+}
+
 async fn handle_send_result(r: Result<Response<elevator::Reply>, Status>) -> Result<(), Status> {
     match r {
         Ok(r) => match ResponseCode::from_i32(r.into_inner().rc) {
             Some(ResponseCode::CarryOn) => return Ok(()),
-            Some(ResponseCode::Exit) => std::process::exit(0),
+            Some(ResponseCode::Exit) => {
+                clean_up();
+                std::process::exit(0);
+            }
             Some(ResponseCode::ConfigUpdate) => println!("Config update"),
             Some(ResponseCode::SoftwareUpdate) => println!("Software update"),
             _ => panic!("Unrecognized response code"),
@@ -573,6 +583,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Invalid configuration. You need to specify at least one of the following data sources: digital_in, can");
     }
 
+    clean_up();
     Ok(())
 }
 
