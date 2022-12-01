@@ -1,5 +1,10 @@
 use ada::ada_client::AdaClient;
-use ada::{can_signal, CanMessage, CanSignal, Point, ResponseCode, Value, Values};
+use ada::remote_control_client::RemoteControlClient;
+use ada::{
+    can_signal, CanMessage, CanSignal, ControlStatus, GpioState, Point, ResponseCode,
+    UnitControlStatus, Value, Values,
+};
+use async_lock::Barrier;
 use async_std::{sync::Mutex, task};
 use can_dbc::{ByteOrder, MultiplexIndicator, SignalExtendedValueType};
 use futures::future::try_join_all;
@@ -15,6 +20,7 @@ use std::fs;
 use std::io::prelude::*;
 use std::process::Command;
 use std::str;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tokio_socketcan::CANSocket;
@@ -32,7 +38,16 @@ lazy_static! {
 }
 
 lazy_static! {
+    static ref DIGITAL_OUT_MAP: Option<HashMap<String, DigitalOutPort>> = create_digital_out_map();
+}
+
+lazy_static! {
     static ref CAN_MSG_QUEUE: Mutex<Vec<CanMessage>> = Mutex::new(Vec::new());
+}
+
+lazy_static! {
+    static ref REMOTE_CONTROL_BARRIER: Arc<Barrier> = Arc::new(Barrier::new(2));
+    static ref REMOTE_CONTROL_IN_PROCESS: Mutex<bool> = Mutex::new(false);
 }
 
 pub const GIT_COMMIT_DESCRIBE: &str = env!("GIT_VERSION");
@@ -122,6 +137,14 @@ async fn handle_send_result(r: Result<Response<ada::Reply>, Status>) -> Result<(
             Some(ResponseCode::Exit) => {
                 clean_up();
                 std::process::exit(0);
+            }
+            Some(ResponseCode::ControlRequest) => {
+                let allow_remote_control = REMOTE_CONTROL_IN_PROCESS.lock().await;
+                if *allow_remote_control {
+                    eprintln!("Remote control session is already in process.")
+                } else {
+                    REMOTE_CONTROL_BARRIER.wait().await;
+                }
             }
             Some(ResponseCode::ConfigUpdate) => println!("Config update"),
             Some(ResponseCode::SoftwareUpdate) => println!("Software update"),
@@ -264,6 +287,50 @@ async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>> {
     }
 }
 
+async fn remote_control_monitor(channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
+    let mut client = RemoteControlClient::with_interceptor(channel, intercept);
+    let status = ControlStatus {
+        code: UnitControlStatus::UnitReady as i32,
+    };
+    loop {
+        REMOTE_CONTROL_BARRIER.wait().await;
+        let mut allow_remote_control = REMOTE_CONTROL_IN_PROCESS.lock().await;
+        *allow_remote_control = true;
+        drop(allow_remote_control);
+        let mut stream = client
+            .control_stream(status.clone())
+            .await
+            .unwrap()
+            .into_inner();
+        while let Some(item) = stream.next().await {
+            match item.as_ref() {
+                Err(e) => {
+                    eprintln!("Error: Item from remote control stream did not contain a command.");
+                    eprintln!("{e}");
+                    set_all_digital_out_to_defaults()?;
+                    let mut allow_remote_control = REMOTE_CONTROL_IN_PROCESS.lock().await;
+                    *allow_remote_control = false;
+                    drop(allow_remote_control);
+                    break;
+                }
+                Ok(item) => {
+                    if item.cmd == "Close" {
+                        set_all_digital_out_to_defaults()?;
+                        let mut allow_remote_control = REMOTE_CONTROL_IN_PROCESS.lock().await;
+                        *allow_remote_control = false;
+                        drop(allow_remote_control);
+                        break;
+                    } else if !DIGITAL_OUT_MAP.as_ref().unwrap().contains_key(&item.cmd) {
+                        eprintln!("Invalid command: {}.", &item.cmd);
+                    } else {
+                        set_digital_out(&item.cmd, item.state)?;
+                    }
+                }
+            };
+        }
+    }
+}
+
 async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
     let dbc = load_dbc_file(CONFIG.can.as_ref().unwrap().dbc_file.as_ref().unwrap())
         .expect("Failed to load DBC file");
@@ -394,6 +461,10 @@ async fn send_initial_values(
     channel: Channel,
     initial_digital_in_vals: Option<HashMap<String, u8>>,
 ) {
+    let mut allow_remote_control = REMOTE_CONTROL_IN_PROCESS.lock().await;
+    *allow_remote_control = true;
+    drop(allow_remote_control);
+
     if initial_digital_in_vals.is_some() {
         for (key, val) in initial_digital_in_vals.clone().unwrap() {
             send_value(channel.clone(), &key, val != 0).await;
@@ -401,6 +472,52 @@ async fn send_initial_values(
     }
     // Send GPS position
     send_point(channel.clone()).await;
+    let mut allow_remote_control = REMOTE_CONTROL_IN_PROCESS.lock().await;
+    *allow_remote_control = false;
+    drop(allow_remote_control);
+}
+
+// Create a HashMap<external name, port> for digital outs
+fn create_digital_out_map() -> Option<HashMap<String, DigitalOutPort>> {
+    if CONFIG.digital_out.is_some() {
+        let mut map: HashMap<String, DigitalOutPort> = HashMap::new();
+        let ports = CONFIG.digital_out.clone().unwrap().ports.unwrap();
+        for p in ports {
+            map.insert(p.external_name.clone(), p);
+        }
+        return Some(map);
+    }
+    None
+}
+
+fn set_digital_out(external_name: &str, state: i32) -> Result<(), gpio_cdev::Error> {
+    let p = DIGITAL_OUT_MAP
+        .as_ref()
+        .expect("Could not find digital out map.")
+        .get(external_name)
+        .expect("Could not map external name to port.");
+    let internal_name = &p.internal_name;
+
+    if let Some((chip_name, line)) = get_digital_chip_and_line(internal_name) {
+        if let Ok(mut chip) = Chip::new(chip_name) {
+            let handle = chip
+                .get_line(line)
+                .unwrap()
+                .request(
+                    LineRequestFlags::OUTPUT,
+                    0,
+                    "set_digital_out {external_name} to {state}",
+                )
+                .unwrap();
+
+            if state == GpioState::Active as i32 {
+                handle.set_value(1 - p.default_state as u8)?;
+            } else {
+                handle.set_value(p.default_state as u8)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn set_all_digital_out_to_defaults() -> Result<(), gpio_cdev::Error> {
@@ -417,11 +534,7 @@ fn set_all_digital_out_to_defaults() -> Result<(), gpio_cdev::Error> {
                     )
                     .unwrap();
 
-                let internal_name = &p[i].internal_name;
-                let external_name = &p[i].external_name;
-                let default_state = p[i].default_state;
-                handle.set_value(default_state as u8)?;
-                eprintln!("{internal_name} ({external_name} set to default state {default_state}.");
+                handle.set_value(p[i].default_state as u8)?;
             }
         }
     }
@@ -525,6 +638,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     send_initial_values(channel.clone(), initial_digital_in_vals).await;
 
     let heartbeat_future = heartbeat(channel.clone());
+    let remote_control_future = remote_control_monitor(channel.clone());
 
     // TODO: refactor this ugly part
     if CONFIG.digital_in.is_some() && CONFIG.can.is_some() {
@@ -545,6 +659,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match tokio::try_join!(
             try_join_all(digital_in_monitor_futures),
             try_join_all(can_monitor_futures),
+            remote_control_future,
             heartbeat_future,
             sender_handle,
         ) {
@@ -561,6 +676,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         match tokio::try_join!(
             try_join_all(can_monitor_futures),
+            remote_control_future,
             heartbeat_future,
             sender_handle,
         ) {
@@ -575,7 +691,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             digital_in_monitor_futures.push(digital_in_monitor(p, channel.clone()));
         }
 
-        match tokio::try_join!(try_join_all(digital_in_monitor_futures), heartbeat_future) {
+        match tokio::try_join!(
+            try_join_all(digital_in_monitor_futures),
+            heartbeat_future,
+            remote_control_future,
+        ) {
             Ok(_) => eprintln!("All tasks completed successfully"),
             Err(e) => eprintln!("Some task failed: {e}"),
         };
