@@ -16,6 +16,8 @@ All requests contain the client ID in the header.
 The following responses can be handled:
 
 - Carry on: continue listening for new data
+- Control request: opens a remote control session in which the server
+  can set digital out ports on the client
 - Software update: download a new version of the client from a predefined location
 - Config update: download a new configuration file for the client
 - Exit: terminate the application with exit code success
@@ -38,11 +40,16 @@ The following signal values are supported:
 CAN timestamps are not yet implemented. There is experimental support
 for multiplexed signals.
 
-## Digital in
+## Digital I/O
 
-Each digital input is given both an internal and an external name. The
+Each digital port is given both an internal and an external name. The
 former is used for finding an existing port on the device and the
 latter for communicating a function to the server.
+
+Each external ports should declare its default state which is
+automatically set at startup and shutdown. During a remote control
+session, setting the port as Active means that its non-default state
+is set.
 
 ## Example configuration
 
@@ -59,6 +66,10 @@ ports = [ { internal_name = "digital-in-0", external_name = "Door" },
           { internal_name = "digital-in-1", external_name = "Light" },
           { internal_name = "digital-in-2", external_name = "Finger protection" }]
 
+[digital_out]
+ports = [ { internal_name = "digital-out-source-0", external_name = "Reset", default_state = false },
+          { internal_name = "digital-out-source-1", external_name = "Up", default_state = false },
+          { internal_name = "digital-out-source-2", external_name = "Down, default_state = false " }]
 
 [can]
 ports = [ { name = "can0", bitrate = 125000, listen_only = true  },
@@ -68,7 +79,7 @@ dbc_file = "sample.dbc"
 [time]
 sleep_min_s = 1
 sleep_max_s = 10
-heartbeat_m = 60
+heartbeat_s = 30
 
 [server]
 address = "example.hostmobility.org"
