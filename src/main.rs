@@ -106,7 +106,7 @@ struct CanPort {
 
 #[derive(Deserialize)]
 struct Time {
-    heartbeat_m: u64,
+    heartbeat_s: u64,
     sleep_max_s: u64,
     sleep_min_s: u64,
 }
@@ -712,7 +712,7 @@ async fn heartbeat(channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
 
     loop {
         let status = ada::Status { code: 0 }; // Always report OK for now.
-        task::sleep(Duration::from_secs(CONFIG.time.heartbeat_m * 60)).await;
+        task::sleep(Duration::from_secs(CONFIG.time.heartbeat_s)).await;
 
         loop {
             let response = client.heart_beat(status.clone()).await;
