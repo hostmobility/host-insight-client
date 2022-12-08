@@ -88,7 +88,7 @@ struct DigitalOutConfig {
 struct DigitalOutPort {
     internal_name: String,
     external_name: String,
-    default_state: bool,
+    default_state: u8,
 }
 
 #[derive(Deserialize, Clone)]
@@ -161,7 +161,7 @@ async fn handle_send_result(r: Result<Response<ada::Reply>, Status>) -> Result<(
     Ok(())
 }
 
-async fn send_value(channel: Channel, channel_name: &str, channel_vale: bool) {
+async fn send_value(channel: Channel, channel_name: &str, channel_vale: u8) {
     let mut client = AdaClient::with_interceptor(channel, intercept);
 
     //Create Vector "list" of Value. Value is defined in ada.proto
@@ -170,7 +170,7 @@ async fn send_value(channel: Channel, channel_name: &str, channel_vale: bool) {
     //Create measurement of type Value
     let meas = Value {
         name: channel_name.into(),
-        value: channel_vale,
+        value: channel_vale as i32,
     };
     //Add measurement to vector "list"
     v.push(meas);
@@ -447,7 +447,7 @@ async fn digital_in_monitor(
             send_value(
                 channel.clone(),
                 &port.external_name,
-                event?.event_type() == EventType::RisingEdge,
+                (event?.event_type() == EventType::RisingEdge) as u8,
             )
             .await
         }
@@ -467,7 +467,7 @@ async fn send_initial_values(
 
     if initial_digital_in_vals.is_some() {
         for (key, val) in initial_digital_in_vals.clone().unwrap() {
-            send_value(channel.clone(), &key, val != 0).await;
+            send_value(channel.clone(), &key, val).await;
         }
     }
     // Send GPS position
@@ -511,9 +511,9 @@ fn set_digital_out(external_name: &str, state: i32) -> Result<(), gpio_cdev::Err
                 .unwrap();
 
             if state == GpioState::Active as i32 {
-                handle.set_value(1 - p.default_state as u8)?;
+                handle.set_value(1 - p.default_state)?;
             } else {
-                handle.set_value(p.default_state as u8)?;
+                handle.set_value(p.default_state)?;
             }
         }
     }
@@ -534,7 +534,7 @@ fn set_all_digital_out_to_defaults() -> Result<(), gpio_cdev::Error> {
                     )
                     .unwrap();
 
-                handle.set_value(p[i].default_state as u8)?;
+                handle.set_value(p[i].default_state)?;
             }
         }
     }
