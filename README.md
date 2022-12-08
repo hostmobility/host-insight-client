@@ -67,9 +67,9 @@ ports = [ { internal_name = "digital-in-0", external_name = "Door" },
           { internal_name = "digital-in-2", external_name = "Finger protection" }]
 
 [digital_out]
-ports = [ { internal_name = "digital-out-source-0", external_name = "Reset", default_state = false },
-          { internal_name = "digital-out-source-1", external_name = "Up", default_state = false },
-          { internal_name = "digital-out-source-2", external_name = "Down, default_state = false " }]
+ports = [ { internal_name = "digital-out-source-0", external_name = "Reset", default_state = 0 },
+          { internal_name = "digital-out-source-1", external_name = "Up", default_state = 0 },
+          { internal_name = "digital-out-source-2", external_name = "Down, default_state = 0 }]
 
 [can]
 ports = [ { name = "can0", bitrate = 125000, listen_only = true  },
