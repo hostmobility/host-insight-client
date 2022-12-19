@@ -78,7 +78,7 @@ dbc_file = "sample.dbc"
 
 [time]
 sleep_min_s = 1
-sleep_max_s = 10
+sleep_max_s = 3600
 heartbeat_s = 30
 
 [server]
