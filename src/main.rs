@@ -1,8 +1,8 @@
 use ada::ada_client::AdaClient;
 use ada::remote_control_client::RemoteControlClient;
 use ada::{
-    can_signal, CanMessage, CanSignal, ControlStatus, GpioState, Point, ResponseCode,
-    UnitControlStatus, Value, Values,
+    can_signal, reply::Action, CanMessage, CanSignal, ControlStatus, GpioState, Point,
+    ResponseCode, UnitControlStatus, Value, Values,
 };
 use async_lock::Barrier;
 use async_std::{sync::Mutex, task};
@@ -141,16 +141,16 @@ async fn handle_send_result(
     s: &mut u64,
 ) -> Result<(), Status> {
     match r {
-        Ok(r) => match ResponseCode::from_i32(r.into_inner().rc) {
-            Some(ResponseCode::CarryOn) => {
+        Ok(r) => match r.into_inner().action {
+            Some(Action::CarryOnMsg(_)) => {
                 *s = CONFIG.time.sleep_min_s;
                 return Ok(());
             }
-            Some(ResponseCode::Exit) => {
+            Some(Action::ExitMsg(msg)) => {
                 clean_up();
-                std::process::exit(0);
+                std::process::exit(msg.reason);
             }
-            Some(ResponseCode::ControlRequest) => {
+            Some(Action::ControlRequestMsg(_)) => {
                 *s = CONFIG.time.sleep_min_s;
                 let allow_remote_control = REMOTE_CONTROL_IN_PROCESS.lock().await;
                 if *allow_remote_control {
@@ -159,15 +159,18 @@ async fn handle_send_result(
                     REMOTE_CONTROL_BARRIER.wait().await;
                 }
             }
-            Some(ResponseCode::ConfigUpdate) => {
+            Some(Action::ConfigUpdateMsg(_msg)) => {
                 *s = CONFIG.time.sleep_min_s;
                 println!("Config update");
             }
-            Some(ResponseCode::SoftwareUpdate) => {
+            Some(Action::SwUpdateMsg(msg)) => {
                 *s = CONFIG.time.sleep_min_s;
-                println!("Software update");
+                println!(
+                    "Updating software version from {} to {}",
+                    GIT_COMMIT_DESCRIBE, msg.version
+                );
             }
-            _ => panic!("Unrecognized response code"),
+            _ => panic!("Unrecognized response"),
         },
         Err(e) => {
             eprintln!("Error: {e}");
