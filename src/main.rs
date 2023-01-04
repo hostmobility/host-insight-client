@@ -2,7 +2,7 @@ use ada::ada_client::AdaClient;
 use ada::remote_control_client::RemoteControlClient;
 use ada::{
     can_signal, reply::Action, CanMessage, CanSignal, ControlStatus, GpioState, Point,
-    ResponseCode, UnitControlStatus, Value, Values,
+    UnitControlStatus, Value, Values,
 };
 use async_lock::Barrier;
 use async_std::{sync::Mutex, task};
@@ -343,7 +343,7 @@ async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>> {
     }
 }
 
-async fn remote_control_monitor(channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
+async fn remote_control_monitor(channel: Channel) -> Result<(), Box<dyn Error>> {
     let mut client = RemoteControlClient::with_interceptor(channel, intercept);
     let status = ControlStatus {
         code: UnitControlStatus::UnitReady as i32,
@@ -387,7 +387,7 @@ async fn remote_control_monitor(channel: Channel) -> Result<ResponseCode, Box<dy
     }
 }
 
-async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
+async fn can_monitor(port: &CanPort) -> Result<(), Box<dyn Error>> {
     let dbc = load_dbc_file(CONFIG.can.as_ref().unwrap().dbc_file.as_ref().unwrap())
         .expect("Failed to load DBC file");
 
@@ -482,13 +482,10 @@ async fn can_monitor(port: &CanPort) -> Result<ResponseCode, Box<dyn Error>> {
             }
         }
     }
-    Ok(ResponseCode::Exit)
+    Ok(())
 }
 
-async fn digital_in_monitor(
-    port: &DigitalInPort,
-    channel: Channel,
-) -> Result<ResponseCode, Box<dyn Error>> {
+async fn digital_in_monitor(port: &DigitalInPort, channel: Channel) -> Result<(), Box<dyn Error>> {
     if let Some((chip_name, line_number)) = get_digital_chip_and_line(&port.internal_name) {
         let mut chip = Chip::new(chip_name)?;
         let line = chip.get_line(line_number)?;
@@ -507,7 +504,7 @@ async fn digital_in_monitor(
             )
             .await
         }
-        Ok(ResponseCode::Exit)
+        Ok(())
     } else {
         Err("Could not find {chip_name} or {line number}")?
     }
@@ -763,7 +760,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn heartbeat(channel: Channel) -> Result<ResponseCode, Box<dyn Error>> {
+async fn heartbeat(channel: Channel) -> Result<(), Box<dyn Error>> {
     let mut client = AdaClient::with_interceptor(channel, intercept);
 
     loop {
@@ -1030,42 +1027,6 @@ fn get_signed_number(
     Some(ada::can_signal::Value::ValI64(
         signal_value as i64 * signal_factor as i64 + signal_offset as i64,
     ))
-}
-
-#[allow(dead_code)]
-async fn download(code: ResponseCode) -> Result<(), std::io::Error> {
-    if code == ResponseCode::SoftwareUpdate {
-        let mut process = Command::new("curl")
-            .arg("-o")
-            .arg("ada-client-new")
-            .arg("https://hm.fps-gbg.net/files/ada/ada-client")
-            .spawn()
-            .ok()
-            .expect("Failed to execute curl.");
-        match process.wait() {
-            Ok(_) => println!("Download completed"),
-            Err(e) => return Err(e),
-        }
-    } else if code == ResponseCode::ConfigUpdate {
-        let local_conf_dir = home::home_dir()
-            .expect("Could not find home directory")
-            .join(".config/ada-client/");
-        fs::create_dir_all(&local_conf_dir)?;
-        let new_local_conf = local_conf_dir.join("conf.toml-new");
-        let mut process = Command::new("curl")
-            .arg("-o")
-            .arg(new_local_conf)
-            .arg("https://hm.fps-gbg.net/files/ada/conf.toml")
-            .spawn()
-            .ok()
-            .expect("Failed to execute curl.");
-        match process.wait() {
-            Ok(_) => println!("Download completed"),
-            Err(e) => return Err(e),
-        }
-    }
-
-    Ok(())
 }
 
 fn is_float(f: f64) -> bool {
