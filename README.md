@@ -18,9 +18,13 @@ The following responses can be handled:
 - Carry on: continue listening for new data
 - Control request: opens a remote control session in which the server
   can set digital out ports on the client
-- Software update: download a new version of the client from a predefined location
 - Config update: download a new configuration file for the client
-- Exit: terminate the application with exit code success
+- Exit: terminate the application with custom exit code
+
+The following responses are yet to be implemented:
+
+- Software update: download a new version of the client from a predefined location
+
 
 Host requirements:
 
