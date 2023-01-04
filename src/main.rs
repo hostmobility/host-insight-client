@@ -159,9 +159,20 @@ async fn handle_send_result(
                     REMOTE_CONTROL_BARRIER.wait().await;
                 }
             }
-            Some(Action::ConfigUpdateMsg(_msg)) => {
+            Some(Action::ConfigUpdateMsg(msg)) => {
                 *s = CONFIG.time.sleep_min_s;
                 println!("Config update");
+                let new_local_conf = home::home_dir()
+                    .expect("Could not find home directory")
+                    .join(".config/ada-client/conf-new.toml");
+
+                let mut file =
+                    fs::File::create(new_local_conf).expect("Could not create new config file");
+                file.write_all(&msg.config)
+                    .expect("Failed to write new config file");
+
+                clean_up();
+                std::process::exit(0);
             }
             Some(Action::SwUpdateMsg(msg)) => {
                 *s = CONFIG.time.sleep_min_s;
@@ -665,11 +676,29 @@ async fn setup_server() -> Channel {
 }
 
 fn load_config() -> Config {
+    let new_local_conf = home::home_dir()
+        .expect("Could not find home directory")
+        .join(".config/ada-client/conf-new.toml");
     let local_conf = home::home_dir()
         .expect("Could not find home directory")
         .join(".config/ada-client/conf.toml");
     let fallback_conf = "/etc/opt/ada-client/conf.toml";
 
+    if new_local_conf.exists() {
+        if let Ok(s) = &fs::read_to_string(new_local_conf.clone()) {
+            let result: Result<Config, toml::de::Error> = toml::from_str(s);
+            if let Ok(config) = result {
+                fs::rename(&new_local_conf, &local_conf).unwrap();
+                return config;
+            } else {
+                eprintln!("The new local config is invalid. Removing it.");
+                fs::remove_file(new_local_conf).unwrap();
+            }
+        } else {
+            eprintln!("Could not parse the new local config as a string. Removing it...");
+            fs::remove_file(new_local_conf).unwrap();
+        };
+    }
     toml::from_str(
         &fs::read_to_string(local_conf)
             .unwrap_or_else(|_| fs::read_to_string(fallback_conf).unwrap()),
