@@ -7,6 +7,7 @@ use ada::{
 use async_lock::Barrier;
 use async_std::{sync::Mutex, task};
 use can_dbc::{ByteOrder, MultiplexIndicator, SignalExtendedValueType};
+use clap::command;
 use futures::future::try_join_all;
 use futures::stream;
 use futures::stream::StreamExt;
@@ -15,10 +16,10 @@ use lazy_static::lazy_static;
 use rand::Rng;
 use serde_derive::Deserialize;
 use std::collections::HashMap;
+use std::env;
 use std::error::Error;
 use std::fs;
 use std::io::prelude::*;
-use std::process::Command;
 use std::str;
 use std::sync::Arc;
 use std::time::Duration;
@@ -615,7 +616,7 @@ fn setup_can() {
         }
 
         // ip link set INTERFACE down
-        let mut process = Command::new("ip")
+        let mut process = std::process::Command::new("ip")
             .arg("link")
             .arg("set")
             .arg(&interface)
@@ -633,7 +634,7 @@ fn setup_can() {
         if p.listen_only.is_some() && !p.listen_only.unwrap() {
             listen_only_state = "off";
         }
-        let mut process = Command::new("ip")
+        let mut process = std::process::Command::new("ip")
             .arg("link")
             .arg("set")
             .arg("up")
@@ -708,6 +709,8 @@ fn load_config() -> Config {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    command!().version(GIT_COMMIT_DESCRIBE).get_matches();
+
     println!("Starting ada-client {}", GIT_COMMIT_DESCRIBE);
     let channel = setup_server().await;
 
