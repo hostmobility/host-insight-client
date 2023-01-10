@@ -181,6 +181,13 @@ async fn handle_send_result(
                     "Updating software version from {} to {}",
                     GIT_COMMIT_DESCRIBE, msg.version
                 );
+                match update_client(&msg.version) {
+                    Err(e) => panic!("Error: {e}"),
+                    Ok(_) => {
+                        clean_up();
+                        std::process::exit(0);
+                    }
+                };
             }
             _ => panic!("Unrecognized response"),
         },
@@ -705,6 +712,33 @@ fn load_config() -> Config {
             .unwrap_or_else(|_| fs::read_to_string(fallback_conf).unwrap()),
     )
     .expect("Failed to load any config file.")
+}
+
+// Update list of packages and then upgrade ada-client to the specified version
+fn update_client(version: &str) -> Result<(), std::io::Error> {
+    let mut process = Command::new("opkg")
+        .arg("update")
+        .spawn()
+        .expect("Failed to execute opkg");
+
+    match process.wait() {
+        Ok(_) => {}
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    let package_name = &format!("ada-client-{}", version);
+    let mut process = Command::new("opkg")
+        .arg("install")
+        .arg(package_name)
+        .spawn()
+        .expect("Failed to execute opkg");
+
+    match process.wait() {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 #[tokio::main]
