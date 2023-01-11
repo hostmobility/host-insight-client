@@ -732,7 +732,7 @@ fn load_config() -> Config {
 
 // Update list of packages and then upgrade ada-client to the specified version
 fn update_client(version: &str) -> Result<(), std::io::Error> {
-    let mut process = Command::new("opkg")
+    let mut process = std::process::Command::new("opkg")
         .arg("update")
         .spawn()
         .expect("Failed to execute opkg");
@@ -745,7 +745,7 @@ fn update_client(version: &str) -> Result<(), std::io::Error> {
     };
 
     let package_name = &format!("ada-client-{}", version);
-    let mut process = Command::new("opkg")
+    let mut process = std::process::Command::new("opkg")
         .arg("install")
         .arg(package_name)
         .spawn()
