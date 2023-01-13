@@ -30,8 +30,8 @@ path = "src/main.rs"
 
 [dependencies]
 async-lock = "2.6.0"
-clap = { version = "4.0.32", features = ["cargo"] }
-tonic = { version = "0.8.3", features = ["tls"] }
+clap = { version = "3.2.23", features = ["cargo"] }
+tonic = { version = "0.8.2", features = ["tls"] }
 prost = "0.11.3"
 tokio = { version = "1.23.0", features = ["macros", "rt-multi-thread", "fs", "io-std", "net"] }
 tokio-socketcan = "0.3.1"

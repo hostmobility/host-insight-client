@@ -26,6 +26,10 @@ The following responses are yet to be implemented:
 - Software update: download a new version of the client from a predefined location
 
 
+Build requirements:
+
+- Rust v1.59.0 or later
+
 Host requirements:
 
 - CAN bus and/or digital inputs
