@@ -16,13 +16,11 @@
 
 [package]
 name = "ada-client"
-description = "A signal monitor and grpc client for GNU/Linux"
-homepage = "https://hostmobility.com"
+description = "A remote I/O client for GNU/Linux"
+homepage = "https://github.com/hostmobility"
 version = "0.3.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
 name = "ada-client"
