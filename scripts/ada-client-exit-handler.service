@@ -1,0 +1,5 @@
+[Unit]
+Description=Acts on ada-client exit codes
+
+[Service]
+ExecStart=/opt/ada-client/exit-handler.sh $MONITOR_EXIT_STATUS

@@ -1,0 +1,12 @@
+[Unit]
+Description=Ada client service
+OnFailure=ada-client-exit-handler.service
+
+[Service]
+Restart=always
+RestartPreventExitStatus=62
+RestartSec=10
+ExecStart=/opt/ada-client/ada-client
+
+[Install]
+WantedBy=multi-user.target
