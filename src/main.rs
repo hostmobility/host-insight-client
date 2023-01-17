@@ -36,6 +36,7 @@ use std::env;
 use std::error::Error;
 use std::fs;
 use std::io::prelude::*;
+use std::path::PathBuf;
 use std::str;
 use std::sync::Arc;
 use std::time::Duration;
@@ -179,9 +180,7 @@ async fn handle_send_result(
             Some(Action::ConfigUpdateMsg(msg)) => {
                 *s = CONFIG.time.sleep_min_s;
                 println!("Config update");
-                let new_local_conf = home::home_dir()
-                    .expect("Could not find home directory")
-                    .join(".config/ada-client/conf-new.toml");
+                let new_local_conf = PathBuf::from("/etc/opt/ada-client/conf-new.toml");
 
                 let mut file =
                     fs::File::create(new_local_conf).expect("Could not create new config file");
@@ -326,10 +325,7 @@ async fn send_point(channel: Channel) {
 }
 
 fn load_dbc_file(s: &str) -> Result<can_dbc::DBC, Box<dyn Error>> {
-    let path = home::home_dir()
-        .expect("Path could not be found")
-        .join(format!(".config/ada-client/{}", s));
-
+    let path = PathBuf::from(format!("/etc/opt/ada-client/{}", s));
     let mut f = fs::File::open(path)?;
     let mut buffer = Vec::new();
     f.read_to_end(&mut buffer)?;
@@ -700,13 +696,9 @@ async fn setup_server() -> Channel {
 }
 
 fn load_config() -> Config {
-    let new_local_conf = home::home_dir()
-        .expect("Could not find home directory")
-        .join(".config/ada-client/conf-new.toml");
-    let local_conf = home::home_dir()
-        .expect("Could not find home directory")
-        .join(".config/ada-client/conf.toml");
-    let fallback_conf = "/etc/opt/ada-client/conf.toml";
+    let new_local_conf = PathBuf::from("/etc/opt/ada-client/conf-new.toml");
+    let local_conf = PathBuf::from("/etc/opt/ada-client/conf.toml");
+    let fallback_conf = PathBuf::from("/etc/opt/ada-client/fallback-conf.toml");
 
     if new_local_conf.exists() {
         if let Ok(s) = &fs::read_to_string(new_local_conf.clone()) {
