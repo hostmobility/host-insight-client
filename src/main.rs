@@ -17,8 +17,8 @@
 use ada::ada_client::AdaClient;
 use ada::remote_control_client::RemoteControlClient;
 use ada::{
-    can_signal, reply::Action, CanMessage, CanSignal, ControlStatus, GpioState, Point,
-    UnitControlStatus, Value, Values,
+    can_signal, reply::Action, CanMessage, CanSignal, ControlStatus, GpioState, UnitControlStatus,
+    Value, Values,
 };
 use async_lock::Barrier;
 use async_std::{sync::Mutex, task};
@@ -84,7 +84,6 @@ struct Config {
     digital_out: Option<DigitalOutConfig>,
     server: ServerConfig,
     time: Time,
-    position: GpsData,
 }
 
 #[derive(Deserialize)]
@@ -133,12 +132,6 @@ struct Time {
     heartbeat_s: u64,
     sleep_max_s: u64,
     sleep_min_s: u64,
-}
-
-#[derive(Deserialize)]
-struct GpsData {
-    longitude: f64,
-    latitude: f64,
 }
 
 fn intercept(mut req: Request<()>) -> Result<Request<()>, Status> {
@@ -299,27 +292,6 @@ async fn send_can_message(channel: Channel, can_message: CanMessage) {
         {
             break;
         }
-    }
-}
-
-async fn send_point(channel: Channel) {
-    let mut client = AdaClient::with_interceptor(channel, intercept);
-
-    //Create measurement of type Value
-    let point = Point {
-        longitude: CONFIG.position.longitude,
-        latitude: CONFIG.position.latitude,
-    };
-
-    let mut retry_sleep_s: u64 = CONFIG.time.sleep_min_s;
-    loop {
-        let response = client.send_position(point.clone()).await;
-        if handle_send_result(response, &mut retry_sleep_s)
-            .await
-            .is_ok()
-        {
-            break;
-        };
     }
 }
 
@@ -553,8 +525,6 @@ async fn send_initial_values(
             send_value(channel.clone(), &key, val).await;
         }
     }
-    // Send GPS position
-    send_point(channel.clone()).await;
     let mut allow_remote_control = REMOTE_CONTROL_IN_PROCESS.lock().await;
     *allow_remote_control = false;
     drop(allow_remote_control);
