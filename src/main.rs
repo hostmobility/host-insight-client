@@ -53,6 +53,7 @@ pub mod ada {
 
 lazy_static! {
     static ref CONFIG: Config = load_config();
+    static ref UID: String = load_uid();
 }
 
 lazy_static! {
@@ -78,7 +79,6 @@ enum ErrorCodes {
 
 #[derive(Deserialize)]
 struct Config {
-    uid: String,
     can: Option<CanConfig>,
     digital_in: Option<DigitalInConfig>,
     digital_out: Option<DigitalOutConfig>,
@@ -142,8 +142,7 @@ struct GpsData {
 }
 
 fn intercept(mut req: Request<()>) -> Result<Request<()>, Status> {
-    req.metadata_mut()
-        .insert("uid", CONFIG.uid.to_string().parse().unwrap());
+    req.metadata_mut().insert("uid", UID.parse().unwrap());
     Ok(req)
 }
 
@@ -693,6 +692,21 @@ async fn setup_server() -> Channel {
     .unwrap();
 
     endpoint.connect_lazy()
+}
+
+fn load_uid() -> String {
+    let uid = PathBuf::from("/etc/opt/ada-client/uid");
+    let serial_number = PathBuf::from("/etc/opt/ada-client/serial_number");
+    let hostname = PathBuf::from("/etc/hostname");
+    if uid.exists() {
+        fs::read_to_string(uid).expect("Failed to read uid file")
+    } else if serial_number.exists() {
+        fs::read_to_string(serial_number).expect("Failed to read serial number file")
+    } else if hostname.exists() {
+        fs::read_to_string(hostname).expect("Failed to read hostname file")
+    } else {
+        panic!("Failed to get uid, serial number or hostname");
+    }
 }
 
 fn load_config() -> Config {
