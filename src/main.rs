@@ -30,7 +30,7 @@ use futures::stream::StreamExt;
 use gpio_cdev::{AsyncLineEventHandle, Chip, EventRequestFlags, EventType, LineRequestFlags};
 use lazy_static::lazy_static;
 use rand::Rng;
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
@@ -53,7 +53,7 @@ pub mod ada {
 
 lazy_static! {
     static ref CONFIG: Config = load_config();
-    static ref UID: String = load_uid();
+    static ref IDENTITY: Identity = load_identity();
 }
 
 lazy_static! {
@@ -75,6 +75,12 @@ const SLEEP_OFFSET: f64 = 0.1;
 
 enum ErrorCodes {
     Etime = 62, // Timer expired
+}
+
+#[derive(Deserialize, Serialize)]
+struct Identity {
+    uid: String,
+    domain: String,
 }
 
 #[derive(Deserialize)]
@@ -135,7 +141,8 @@ struct Time {
 }
 
 fn intercept(mut req: Request<()>) -> Result<Request<()>, Status> {
-    req.metadata_mut().insert("uid", UID.parse().unwrap());
+    req.metadata_mut()
+        .insert("uid", IDENTITY.id.parse().unwrap());
     Ok(req)
 }
 
@@ -178,6 +185,26 @@ async fn handle_send_result(
                     fs::File::create(new_local_conf).expect("Could not create new config file");
                 file.write_all(&msg.config)
                     .expect("Failed to write new config file");
+
+                clean_up();
+                std::process::exit(0);
+            }
+            Some(Action::IdentityUpdateMsg(msg)) => {
+                *s = CONFIG.time.sleep_min_s;
+                println!("Identity update");
+                let new_identity = Identity {
+                    uid: msg.uid,
+                    domain: msg.domain,
+                };
+
+                let toml_string =
+                    toml::to_string(&new_identity).expect("Could not encode new identity as TOML");
+
+                fs::write(
+                    PathBuf::from("/etc/opt/ada-client/identity.toml"),
+                    toml_string,
+                )
+                .expect("Could not write to file!");
 
                 clean_up();
                 std::process::exit(0);
@@ -664,28 +691,15 @@ async fn setup_server() -> Channel {
     endpoint.connect_lazy()
 }
 
-fn load_uid() -> String {
-    let uid = PathBuf::from("/etc/opt/ada-client/uid");
-    let serial_number = PathBuf::from("/etc/opt/ada-client/serial_number");
-    let hostname = PathBuf::from("/etc/hostname");
-    if uid.exists() {
-        fs::read_to_string(uid)
-            .expect("Failed to read uid file")
-            .parse()
-            .unwrap()
-    } else if serial_number.exists() {
-        fs::read_to_string(serial_number)
-            .expect("Failed to read serial number file")
-            .parse()
-            .unwrap()
-    } else if hostname.exists() {
-        fs::read_to_string(hostname)
-            .expect("Failed to read hostname file")
-            .parse()
-            .unwrap()
-    } else {
-        panic!("Failed to get uid, serial number or hostname");
-    }
+fn load_identity() -> Identity {
+    let identity = PathBuf::from("/etc/opt/ada-client/identity.toml");
+    let fallback_identity = PathBuf::from("/etc/opt/ada-client/fallback-identity.toml");
+
+    toml::from_str(
+        &fs::read_to_string(identity)
+            .unwrap_or_else(|_| fs::read_to_string(fallback_identity).unwrap()),
+    )
+    .expect("Identity could not be established.")
 }
 
 fn load_config() -> Config {
