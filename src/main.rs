@@ -811,7 +811,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => eprintln!("Some task failed: {e}"),
         };
     } else {
-        eprintln!("Invalid configuration. You need to specify at least one of the following data sources: digital_in, can");
+        match tokio::try_join!(heartbeat_future, remote_control_future) {
+            Ok(_) => eprintln!("All tasks completed successfully"),
+            Err(e) => eprintln!("Some task failed: {e}"),
+        };
     }
 
     clean_up();
