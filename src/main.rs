@@ -17,8 +17,8 @@
 use ada::ada_client::AdaClient;
 use ada::remote_control_client::RemoteControlClient;
 use ada::{
-    can_signal, reply::Action, CanMessage, CanSignal, ControlStatus, GpioState, UnitControlStatus,
-    Value, Values,
+    can_signal, reply::Action, CanMessage, CanSignal, ControlStatus, GpioState, State,
+    UnitControlStatus, Value, Values,
 };
 use async_lock::Barrier;
 use async_std::{sync::Mutex, task};
@@ -305,6 +305,59 @@ async fn send_can_message_stream(channel: Channel, can_messages: Vec<CanMessage>
     }
 }
 
+// TODO: Make this function return Result<String, Error> Right now, it
+// is Option<String> because dbc_hash can be None (if no dbc file
+// exists).
+fn get_md5sum(path: &str) -> Option<String> {
+    let output = std::process::Command::new("md5sum").arg(path).output();
+
+    match output {
+        Ok(o) => Some(String::from_utf8(o.stdout).expect("Failed to parse stdout as utf8")),
+        Err(_) => None,
+    }
+}
+
+async fn send_state(channel: Channel) {
+    let mut client = AdaClient::with_interceptor(channel, intercept);
+
+    let local_conf = PathBuf::from("/etc/opt/ada-client/conf.toml");
+    let fallback_conf = PathBuf::from("/etc/opt/ada-client/fallback-conf.toml");
+    let current_config = if local_conf.exists() {
+        local_conf
+    } else if fallback_conf.exists() {
+        fallback_conf
+    } else {
+        panic!("No config found");
+    };
+
+    let mut dbc_hash = None;
+    if CONFIG.can.is_some() {
+        let path = PathBuf::from(format!(
+            "/etc/opt/ada-client/{}",
+            CONFIG.can.as_ref().unwrap().dbc_file.as_ref().unwrap()
+        ));
+        dbc_hash = get_md5sum(path.to_str().unwrap());
+    };
+
+    let config_hash = get_md5sum(current_config.to_str().unwrap());
+    let state = State {
+        sw_version: GIT_COMMIT_DESCRIBE.to_string(),
+        config_md5sum: config_hash.unwrap(),
+        dbc_md5sum: dbc_hash,
+    };
+
+    let mut retry_sleep_s: u64 = CONFIG.time.sleep_min_s;
+    loop {
+        let response = client.send_current_state(state.clone()).await;
+        if handle_send_result(response, &mut retry_sleep_s)
+            .await
+            .is_ok()
+        {
+            break;
+        };
+    }
+}
+
 #[allow(dead_code)]
 async fn send_can_message(channel: Channel, can_message: CanMessage) {
     let mut client = AdaClient::with_interceptor(channel, intercept);
@@ -546,6 +599,8 @@ async fn send_initial_values(
     let mut allow_remote_control = REMOTE_CONTROL_IN_PROCESS.lock().await;
     *allow_remote_control = true;
     drop(allow_remote_control);
+
+    send_state(channel.clone()).await;
 
     if initial_digital_in_vals.is_some() {
         for (key, val) in initial_digital_in_vals.clone().unwrap() {
