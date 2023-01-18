@@ -669,11 +669,20 @@ fn load_uid() -> String {
     let serial_number = PathBuf::from("/etc/opt/ada-client/serial_number");
     let hostname = PathBuf::from("/etc/hostname");
     if uid.exists() {
-        fs::read_to_string(uid).expect("Failed to read uid file")
+        fs::read_to_string(uid)
+            .expect("Failed to read uid file")
+            .parse()
+            .unwrap()
     } else if serial_number.exists() {
-        fs::read_to_string(serial_number).expect("Failed to read serial number file")
+        fs::read_to_string(serial_number)
+            .expect("Failed to read serial number file")
+            .parse()
+            .unwrap()
     } else if hostname.exists() {
-        fs::read_to_string(hostname).expect("Failed to read hostname file")
+        fs::read_to_string(hostname)
+            .expect("Failed to read hostname file")
+            .parse()
+            .unwrap()
     } else {
         panic!("Failed to get uid, serial number or hostname");
     }
