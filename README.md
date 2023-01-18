@@ -1,17 +1,16 @@
-# Client
+# Ada-client
 
-This application implements a grpc client with interrupt-driven async
+This application implements a gRPC client with interrupt-driven async
 monitors for reading events on digital-in and/or CAN frames on a
-GNU/Linux system and then transmitting them securely (TLS) to a grpc
+GNU/Linux system and then transmitting them securely (TLS) to a gRPC
 server. CAN frames are decoded using a DBC file and sent in
 a human-readable format.
 
 In addition, the following data is sent:
 
-- GPS location (at boot)
 - heartbeat containing a status code (at some regular interval)
 
-All requests contain the client ID in the header.
+All requests include the client ID in the header.
 
 The following responses can be handled:
 
@@ -19,16 +18,18 @@ The following responses can be handled:
 - Control request: opens a remote control session in which the server
   can set digital out ports on the client
 - Config update: download a new configuration file for the client
+- Software update: download a new version of the client from a predefined location
 - Exit: terminate the application with custom exit code
 
 The following responses are yet to be implemented:
 
-- Software update: download a new version of the client from a predefined location
+- Provision: receive a UID from deployment server and save it on the device
 
 
 Build requirements:
 
 - Rust v1.59.0 or later
+- Protobuf compiler
 
 Host requirements:
 
@@ -61,14 +62,12 @@ is set.
 
 ## Example configuration
 
-The application will look for a conf.toml file firstly in
-~/.config/ada-client/ and secondly in /etc/opt/ada-client/.
+The application will look for and use conf-new.toml, conf.toml or
+conf-fallback.toml (in that order) in /etc/opt/ada-client/.
 
 Example configuration that enables three digital-in and two CAN ports:
 
 ```
-uid = "42"
-
 [digital_in]
 ports = [ { internal_name = "digital-in-0", external_name = "Door" },
           { internal_name = "digital-in-1", external_name = "Light" },
@@ -91,10 +90,6 @@ heartbeat_s = 30
 
 [server]
 address = "example.hostmobility.org"
-
-[position]
-longitude = 12.013
-latitude = 57.674
 ```
 
 ## Building for ARM32 on Debian GNU/Linux
@@ -104,7 +99,7 @@ Install build dependencies:
 ```
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup target add armv7-unknown-linux-gnueabihf
-sudo apt install gcc-arm-linux-gnueabihf linux-libc-dev-armhf-cross
+sudo apt install gcc-arm-linux-gnueabihf linux-libc-dev-armhf-cross protobuf-compiler
 ```
 
 Use ARMv7 linker:
@@ -119,25 +114,7 @@ Build:
 cargo build --target=armv7-unknown-linux-gnueabihf --release
 ```
 
-## Systemd example service
-
-```
-[Unit]
-Description=Ada client service
-
-[Service]
-Restart=always
-WorkingDirectory=/home/root/
-RestartSec=10
-User=root
-Environment="HOME=/home/root/"
-ExecStart=/opt/ada-client/ada-client
-
-[Install]
-WantedBy=multi-user.target
-```
-
-# Copying conditions
+# Copying
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
