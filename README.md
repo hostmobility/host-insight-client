@@ -9,6 +9,8 @@ a human-readable format.
 In addition, the following data is sent:
 
 - heartbeat containing a status code (at some regular interval)
+- current state containing sofware version and md5sum hashes of config
+  and DBC file, if any (once after start)
 
 All requests include the client ID in the header.
 
@@ -18,13 +20,10 @@ The following responses can be handled:
 - Control request: opens a remote control session in which the server
   can set digital out ports on the client
 - Config update: download a new configuration file for the client
+- Identity update: receive a unique identity and domain name from
+  deployment server and save it on the device
 - Software update: download a new version of the client from a predefined location
 - Exit: terminate the application with custom exit code
-
-The following responses are yet to be implemented:
-
-- Provision: receive a UID from deployment server and save it on the device
-
 
 Build requirements:
 
@@ -60,6 +59,16 @@ automatically set at startup and shutdown. During a remote control
 session, setting the port as Active means that its non-default state
 is set.
 
+## Example identity
+
+A unique identity and target URL is expected in identity.toml or
+conf-fallback.toml (in that order) under /etc/opt/ada-client/.
+
+```
+uid = "123456"
+domain = "example.hostmobility.com"
+```
+
 ## Example configuration
 
 The application will look for and use conf-new.toml, conf.toml or
@@ -87,9 +96,6 @@ dbc_file = "sample.dbc"
 sleep_min_s = 1
 sleep_max_s = 3600
 heartbeat_s = 30
-
-[server]
-address = "example.hostmobility.org"
 ```
 
 ## Building for ARM32 on Debian GNU/Linux
