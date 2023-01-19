@@ -88,13 +88,7 @@ struct Config {
     can: Option<CanConfig>,
     digital_in: Option<DigitalInConfig>,
     digital_out: Option<DigitalOutConfig>,
-    server: ServerConfig,
     time: Time,
-}
-
-#[derive(Deserialize)]
-struct ServerConfig {
-    address: String,
 }
 
 #[derive(Deserialize, Clone)]
@@ -142,7 +136,7 @@ struct Time {
 
 fn intercept(mut req: Request<()>) -> Result<Request<()>, Status> {
     req.metadata_mut()
-        .insert("uid", IDENTITY.id.parse().unwrap());
+        .insert("uid", IDENTITY.uid.parse().unwrap());
     Ok(req)
 }
 
@@ -727,16 +721,15 @@ fn setup_can() {
 
 async fn setup_server() -> Channel {
     // Connect to server
-    //let server: ServerConfig = CONFIG.server;
     let pem = tokio::fs::read("/etc/ssl/certs/ca-certificates.crt").await;
     let ca = Certificate::from_pem(pem.unwrap());
 
     let tls = ClientTlsConfig::new()
         .ca_certificate(ca)
-        .domain_name(CONFIG.server.address.clone());
+        .domain_name(IDENTITY.domain.clone());
 
     let endpoint = Channel::builder(
-        format!("https://{}", CONFIG.server.address.clone())
+        format!("https://{}", IDENTITY.domain.clone())
             .parse()
             .unwrap(),
     )
