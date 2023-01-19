@@ -203,6 +203,14 @@ async fn handle_send_result(
                 clean_up();
                 std::process::exit(0);
             }
+            Some(Action::FetchResourceMsg(msg)) => {
+                *s = CONFIG.time.sleep_min_s;
+                println!("Fetching resource");
+                fetch_resource(&msg.url, msg.target_location)?;
+
+                clean_up();
+                std::process::exit(0);
+            }
             Some(Action::SwUpdateMsg(msg)) => {
                 *s = CONFIG.time.sleep_min_s;
                 println!(
@@ -297,6 +305,32 @@ async fn send_can_message_stream(channel: Channel, can_messages: Vec<CanMessage>
             break;
         };
     }
+}
+
+fn fetch_resource(url: &str, dst: Option<String>) -> Result<(), std::io::Error> {
+    if dst.is_some() {
+        let mut process = std::process::Command::new("curl")
+            .arg("-o")
+            .arg(format!("/etc/opt/ada-client/{}", dst.unwrap()))
+            .arg(url)
+            .spawn()
+            .ok()
+            .expect("Failed to execute curl.");
+        process.wait()?;
+    } else {
+        let url_components: Vec<&str> = url.split('/').collect();
+        let file_name = url_components[url_components.len() - 1];
+        let mut process = std::process::Command::new("curl")
+            .arg("-o")
+            .arg(format!("/etc/opt/ada-client/{}", file_name))
+            .arg(url)
+            .spawn()
+            .ok()
+            .expect("Failed to execute curl.");
+        process.wait()?;
+    }
+
+    Ok(())
 }
 
 // TODO: Make this function return Result<String, Error> Right now, it

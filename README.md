@@ -22,6 +22,7 @@ The following responses can be handled:
 - Config update: download a new configuration file for the client
 - Identity update: receive a unique identity and domain name from
   deployment server and save it on the device
+- Fetch resource: download an arbitrary resource, e.g. a DBC file, to the device
 - Software update: download a new version of the client from a predefined location
 - Exit: terminate the application with custom exit code
 
