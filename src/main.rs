@@ -307,7 +307,7 @@ fn load_dbc_file(s: &str) -> Result<can_dbc::DBC, Box<dyn Error>> {
 // Checks if the last signal value sent is equal to supllied signal and value
 fn is_can_signal_duplicate(
     map: &HashMap<String, Option<can_signal::Value>>,
-    name: &String,
+    name: &str,
     val: &Option<can_signal::Value>,
 ) -> bool {
     if let Some(last_sent) = map.get_key_value(name) {
