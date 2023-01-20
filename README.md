@@ -34,8 +34,12 @@ Build requirements:
 Host requirements:
 
 - CAN bus and/or digital inputs
+- curl
 - glibc v2.28 or later
 - OpenSSL
+- opkg
+- md5sum
+- systemd
 
 ## CAN
 
