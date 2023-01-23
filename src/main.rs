@@ -349,7 +349,7 @@ async fn send_state(channel: Channel) {
     let mut client = AdaClient::with_interceptor(channel, intercept);
 
     let local_conf = PathBuf::from("/etc/opt/ada-client/conf.toml");
-    let fallback_conf = PathBuf::from("/etc/opt/ada-client/fallback-conf.toml");
+    let fallback_conf = PathBuf::from("/etc/opt/ada-client/conf-fallback.toml");
     let current_config = if local_conf.exists() {
         local_conf
     } else if fallback_conf.exists() {
@@ -787,7 +787,7 @@ fn load_identity() -> Identity {
 fn load_config() -> Config {
     let new_local_conf = PathBuf::from("/etc/opt/ada-client/conf-new.toml");
     let local_conf = PathBuf::from("/etc/opt/ada-client/conf.toml");
-    let fallback_conf = PathBuf::from("/etc/opt/ada-client/fallback-conf.toml");
+    let fallback_conf = PathBuf::from("/etc/opt/ada-client/conf-fallback.toml");
 
     if new_local_conf.exists() {
         if let Ok(s) = &fs::read_to_string(new_local_conf.clone()) {
