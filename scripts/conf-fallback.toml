@@ -1,0 +1,4 @@
+[time]
+sleep_min_s = 1
+sleep_max_s = 3600
+heartbeat_s = 30
