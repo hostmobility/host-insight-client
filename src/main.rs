@@ -775,7 +775,7 @@ async fn setup_server() -> Channel {
 
 fn load_identity() -> Identity {
     let identity = PathBuf::from("/etc/opt/ada-client/identity.toml");
-    let fallback_identity = PathBuf::from("/etc/opt/ada-client/fallback-identity.toml");
+    let fallback_identity = PathBuf::from("/etc/opt/ada-client/identity-fallback.toml");
 
     toml::from_str(
         &fs::read_to_string(identity)
