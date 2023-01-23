@@ -67,7 +67,7 @@ is set.
 ## Example identity
 
 A unique identity and target URL is expected in identity.toml or
-conf-fallback.toml (in that order) under /etc/opt/ada-client/.
+identity-fallback.toml (in that order) under /etc/opt/ada-client/.
 
 ```
 uid = "123456"
