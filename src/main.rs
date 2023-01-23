@@ -70,6 +70,8 @@ lazy_static! {
 }
 
 pub const GIT_COMMIT_DESCRIBE: &str = env!("GIT_VERSION");
+pub const BIN_DIR: &str = env!("BIN_DIR");
+pub const CONF_DIR: &str = env!("CONF_DIR");
 
 const SLEEP_OFFSET: f64 = 0.1;
 
@@ -173,7 +175,7 @@ async fn handle_send_result(
             Some(Action::ConfigUpdateMsg(msg)) => {
                 *s = CONFIG.time.sleep_min_s;
                 println!("Config update");
-                let new_local_conf = PathBuf::from("/etc/opt/ada-client/conf-new.toml");
+                let new_local_conf = PathBuf::from(format!("{}/conf-new.toml", CONF_DIR));
 
                 let mut file =
                     fs::File::create(new_local_conf).expect("Could not create new config file");
@@ -195,7 +197,7 @@ async fn handle_send_result(
                     toml::to_string(&new_identity).expect("Could not encode new identity as TOML");
 
                 fs::write(
-                    PathBuf::from("/etc/opt/ada-client/identity.toml"),
+                    PathBuf::from(format!("{}/identity.toml", CONF_DIR)),
                     toml_string,
                 )
                 .expect("Could not write to file!");
@@ -311,7 +313,7 @@ fn fetch_resource(url: &str, dst: Option<String>) -> Result<(), std::io::Error> 
     if dst.is_some() {
         let mut process = std::process::Command::new("curl")
             .arg("-o")
-            .arg(format!("/etc/opt/ada-client/{}", dst.unwrap()))
+            .arg(format!("{}/{}", CONF_DIR, dst.unwrap()))
             .arg(url)
             .spawn()
             .ok()
@@ -322,7 +324,7 @@ fn fetch_resource(url: &str, dst: Option<String>) -> Result<(), std::io::Error> 
         let file_name = url_components[url_components.len() - 1];
         let mut process = std::process::Command::new("curl")
             .arg("-o")
-            .arg(format!("/etc/opt/ada-client/{}", file_name))
+            .arg(format!("{}/{}", CONF_DIR, file_name))
             .arg(url)
             .spawn()
             .ok()
@@ -348,8 +350,8 @@ fn get_md5sum(path: &str) -> Option<String> {
 async fn send_state(channel: Channel) {
     let mut client = AdaClient::with_interceptor(channel, intercept);
 
-    let local_conf = PathBuf::from("/etc/opt/ada-client/conf.toml");
-    let fallback_conf = PathBuf::from("/etc/opt/ada-client/conf-fallback.toml");
+    let local_conf = PathBuf::from(format!("{}/conf.toml", CONF_DIR));
+    let fallback_conf = PathBuf::from(format!("{}/conf-fallback.toml", CONF_DIR));
     let current_config = if local_conf.exists() {
         local_conf
     } else if fallback_conf.exists() {
@@ -361,7 +363,8 @@ async fn send_state(channel: Channel) {
     let mut dbc_hash = None;
     if CONFIG.can.is_some() {
         let path = PathBuf::from(format!(
-            "/etc/opt/ada-client/{}",
+            "{}/{}",
+            CONF_DIR,
             CONFIG.can.as_ref().unwrap().dbc_file.as_ref().unwrap()
         ));
         dbc_hash = get_md5sum(path.to_str().unwrap());
@@ -404,7 +407,7 @@ async fn send_can_message(channel: Channel, can_message: CanMessage) {
 }
 
 fn load_dbc_file(s: &str) -> Result<can_dbc::DBC, Box<dyn Error>> {
-    let path = PathBuf::from(format!("/etc/opt/ada-client/{}", s));
+    let path = PathBuf::from(format!("{}/{}", CONF_DIR, s));
     let mut f = fs::File::open(path)?;
     let mut buffer = Vec::new();
     f.read_to_end(&mut buffer)?;
@@ -774,8 +777,8 @@ async fn setup_server() -> Channel {
 }
 
 fn load_identity() -> Identity {
-    let identity = PathBuf::from("/etc/opt/ada-client/identity.toml");
-    let fallback_identity = PathBuf::from("/etc/opt/ada-client/identity-fallback.toml");
+    let identity = PathBuf::from(format!("{}/identity.toml", CONF_DIR));
+    let fallback_identity = PathBuf::from(format!("{}/identity-fallback.toml", CONF_DIR));
 
     toml::from_str(
         &fs::read_to_string(identity)
@@ -785,9 +788,9 @@ fn load_identity() -> Identity {
 }
 
 fn load_config() -> Config {
-    let new_local_conf = PathBuf::from("/etc/opt/ada-client/conf-new.toml");
-    let local_conf = PathBuf::from("/etc/opt/ada-client/conf.toml");
-    let fallback_conf = PathBuf::from("/etc/opt/ada-client/conf-fallback.toml");
+    let new_local_conf = PathBuf::from(format!("{}/conf-new.toml", CONF_DIR));
+    let local_conf = PathBuf::from(format!("{}/conf.toml", CONF_DIR));
+    let fallback_conf = PathBuf::from(format!("{}/conf-fallback.toml", CONF_DIR));
 
     if new_local_conf.exists() {
         if let Ok(s) = &fs::read_to_string(new_local_conf.clone()) {

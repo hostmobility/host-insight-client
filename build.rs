@@ -24,6 +24,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
     let git_version = String::from_utf8(git_describe_output.stdout).unwrap();
     println!("cargo:rustc-env=GIT_VERSION={}", git_version);
+    let bin_dir = "/opt/ada-client";
+    println!("cargo:rustc-env=BIN_DIR={}", bin_dir);
+    let conf_dir = "/etc/opt/ada-client";
+    println!("cargo:rustc-env=CONF_DIR={}", conf_dir);
     // Build proto
     let mut config = prost_build::Config::new();
     config.protoc_arg("--experimental_allow_proto3_optional");
