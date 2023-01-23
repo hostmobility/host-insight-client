@@ -18,7 +18,7 @@
 name = "host-insight-client"
 description = "A remote I/O client for GNU/Linux"
 homepage = "https://github.com/hostmobility"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
