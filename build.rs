@@ -1,11 +1,13 @@
 // Copyright (C) 2023  Host Mobility AB
 
-// This program is free software: you can redistribute it and/or modify
+// This file is part of HOST Insight Client
+
+// HOST Insight Client is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-// This program is distributed in the hope that it will be useful,
+// HOST Insight Client is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
@@ -24,9 +26,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
     let git_version = String::from_utf8(git_describe_output.stdout).unwrap();
     println!("cargo:rustc-env=GIT_VERSION={}", git_version);
-    let bin_dir = "/opt/ada-client";
+    let bin_dir = "/opt/host-insight-client";
     println!("cargo:rustc-env=BIN_DIR={}", bin_dir);
-    let conf_dir = "/etc/opt/ada-client";
+    let conf_dir = "/etc/opt/host-insight-client";
     println!("cargo:rustc-env=CONF_DIR={}", conf_dir);
     // Build proto
     let mut config = prost_build::Config::new();

@@ -1,4 +1,4 @@
-# Ada-client
+# HOST Insight Client
 
 This application implements a gRPC client with interrupt-driven async
 monitors for reading events on digital-in and/or CAN frames on a
@@ -67,7 +67,8 @@ is set.
 ## Example identity
 
 A unique identity and target URL is expected in identity.toml or
-identity-fallback.toml (in that order) under /etc/opt/ada-client/.
+identity-fallback.toml (in that order) under
+/etc/opt/host-insight-client/.
 
 ```
 uid = "123456"
@@ -77,7 +78,7 @@ domain = "example.hostmobility.com"
 ## Example configuration
 
 The application will look for and use conf-new.toml, conf.toml or
-conf-fallback.toml (in that order) in /etc/opt/ada-client/.
+conf-fallback.toml (in that order) in /etc/opt/host-insight-client/.
 
 Example configuration that enables three digital-in and two CAN ports:
 
@@ -127,12 +128,12 @@ cargo build --target=armv7-unknown-linux-gnueabihf --release
 
 # Copying
 
-This program is free software; you can redistribute it and/or modify
+HOST Insight Client is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation; either version 3 of the License, or
 (at your option) any later version.
 
-This program is distributed in the hope that it will be useful,
+HOST Insight Client is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.

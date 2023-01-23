@@ -1,11 +1,13 @@
 // Copyright (C) 2023  Host Mobility AB
 
-// This program is free software: you can redistribute it and/or modify
+// This file is part of HOST Insight Client
+
+// HOST Insight Client is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-// This program is distributed in the hope that it will be useful,
+// HOST Insight Client is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
@@ -814,7 +816,7 @@ fn load_config() -> Config {
     .expect("Failed to load any config file.")
 }
 
-// Update list of packages and then upgrade ada-client to the specified version
+// Update list of packages and then upgrade client to the specified version
 fn update_client(version: &str) -> Result<(), std::io::Error> {
     let mut process = std::process::Command::new("opkg")
         .arg("update")
@@ -828,7 +830,7 @@ fn update_client(version: &str) -> Result<(), std::io::Error> {
         }
     };
 
-    let package_name = &format!("ada-client-{}", version);
+    let package_name = &format!("host-insight-client-{}", version);
     let mut process = std::process::Command::new("opkg")
         .arg("install")
         .arg(package_name)
@@ -845,7 +847,7 @@ fn update_client(version: &str) -> Result<(), std::io::Error> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     command!().version(GIT_COMMIT_DESCRIBE).get_matches();
 
-    println!("Starting ada-client {}", GIT_COMMIT_DESCRIBE);
+    println!("Starting HOST Insight Client {}", GIT_COMMIT_DESCRIBE);
     let channel = setup_server().await;
 
     if CONFIG.digital_out.is_some() {

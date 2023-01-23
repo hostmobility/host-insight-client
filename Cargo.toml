@@ -15,7 +15,7 @@
 # Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 
 [package]
-name = "ada-client"
+name = "host-insight-client"
 description = "A remote I/O client for GNU/Linux"
 homepage = "https://github.com/hostmobility"
 version = "0.3.0"
