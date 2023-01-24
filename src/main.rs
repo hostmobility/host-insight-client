@@ -318,7 +318,6 @@ fn fetch_resource(url: &str, dst: Option<String>) -> Result<(), std::io::Error> 
             .arg(format!("{}/{}", CONF_DIR, dst.unwrap()))
             .arg(url)
             .spawn()
-            .ok()
             .expect("Failed to execute curl.");
         process.wait()?;
     } else {
@@ -329,7 +328,6 @@ fn fetch_resource(url: &str, dst: Option<String>) -> Result<(), std::io::Error> 
             .arg(format!("{}/{}", CONF_DIR, file_name))
             .arg(url)
             .spawn()
-            .ok()
             .expect("Failed to execute curl.");
         process.wait()?;
     }
@@ -621,7 +619,7 @@ async fn digital_in_monitor(port: &DigitalInPort, channel: Channel) -> Result<()
         }
         Ok(())
     } else {
-        Err("Could not find {chip_name} or {line number}")?
+        Err("Could not find chip name or line number from {&port.internal}".into())
     }
 }
 
@@ -725,7 +723,6 @@ fn setup_can() {
             .arg(&interface)
             .arg("down")
             .spawn()
-            .ok()
             .expect("Failed to run ip command.");
         match process.wait() {
             Ok(_) => eprintln!("Interface {} is down", &interface),
@@ -749,7 +746,6 @@ fn setup_can() {
             .arg("listen-only")
             .arg(listen_only_state)
             .spawn()
-            .ok()
             .expect("Failed to run ip command.");
         match process.wait() {
             Ok(_) => eprintln!("Interface {} is up", &interface),
@@ -1029,16 +1025,16 @@ fn get_can_signal_value(
     let signal_value = get_signal_value(frame_value, *s.start_bit(), *s.signal_size());
 
     match get_signal_value_type(s, dbc, id) {
-        Some(SignalValueType::FLOAT) => get_float(signal_value, *s.factor(), *s.offset()),
-        Some(SignalValueType::SIGNED) => {
+        Some(SignalValueType::Float) => get_float(signal_value, *s.factor(), *s.offset()),
+        Some(SignalValueType::Signed) => {
             get_signed_number(signal_value, *s.signal_size(), *s.factor(), *s.offset())
         }
-        Some(SignalValueType::UNSIGNED) => {
+        Some(SignalValueType::Unsigned) => {
             get_unsigned_number(signal_value, *s.factor(), *s.offset())
         }
-        Some(SignalValueType::DOUBLE) => get_double(signal_value, *s.factor(), *s.offset()),
+        Some(SignalValueType::Double) => get_double(signal_value, *s.factor(), *s.offset()),
         // FIXME: IMPLEMENT BOOL
-        Some(SignalValueType::STRING) => get_string(signal_value, dbc, id, s),
+        Some(SignalValueType::String) => get_string(signal_value, dbc, id, s),
         _ => None,
     }
 }
@@ -1072,12 +1068,12 @@ fn get_multiplex_val(s: &can_dbc::Signal) -> u64 {
 
 #[derive(Debug)]
 enum SignalValueType {
-    FLOAT,
-    SIGNED,
-    UNSIGNED,
-    DOUBLE,
-    // BOOL,  UNIMPLEMENTED
-    STRING,
+    Float,
+    Signed,
+    Unsigned,
+    Double,
+    // Bool,  UNIMPLEMENTED
+    String,
 }
 
 fn get_signal_value_type(
@@ -1087,7 +1083,7 @@ fn get_signal_value_type(
 ) -> Option<SignalValueType> {
     let val_desc = dbc.value_descriptions_for_signal(*id, s.name());
     if val_desc.is_some() {
-        return Some(SignalValueType::STRING);
+        return Some(SignalValueType::String);
     }
 
     let mut value_type_extended: Option<can_dbc::SignalExtendedValueType> =
@@ -1100,11 +1096,11 @@ fn get_signal_value_type(
         }
     }
     match value_type_extended {
-        Some(SignalExtendedValueType::IEEEfloat32Bit) => Some(SignalValueType::FLOAT),
-        Some(SignalExtendedValueType::IEEEdouble64bit) => Some(SignalValueType::DOUBLE),
+        Some(SignalExtendedValueType::IEEEfloat32Bit) => Some(SignalValueType::Float),
+        Some(SignalExtendedValueType::IEEEdouble64bit) => Some(SignalValueType::Double),
         Some(SignalExtendedValueType::SignedOrUnsignedInteger) => match *s.value_type() {
-            can_dbc::ValueType::Unsigned => Some(SignalValueType::UNSIGNED),
-            can_dbc::ValueType::Signed => Some(SignalValueType::SIGNED),
+            can_dbc::ValueType::Unsigned => Some(SignalValueType::Unsigned),
+            can_dbc::ValueType::Signed => Some(SignalValueType::Signed),
         },
         _ => None,
     }
