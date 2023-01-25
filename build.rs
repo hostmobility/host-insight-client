@@ -21,7 +21,7 @@ use std::process::Command;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Include the output of git describe --tags --long --dirty
     let git_describe_output = Command::new("git")
-        .args(["describe", "--tags", "--long", "--dirty"])
+        .args(["describe", "--tags", "--dirty"])
         .output()
         .unwrap();
     let git_version = String::from_utf8(git_describe_output.stdout).unwrap();
