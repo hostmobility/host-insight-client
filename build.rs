@@ -36,9 +36,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure().compile_with_config(
         config,
         &[
-            "proto/ada.proto",
-            "proto/ada_controller.proto",
-            "proto/ada_enums.proto",
+            "proto/host_insight.proto",
+            "proto/host_insight_controller.proto",
+            "proto/host_insight_enums.proto",
         ],
         &["proto"],
     )?;
