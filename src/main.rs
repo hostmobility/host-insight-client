@@ -217,10 +217,6 @@ async fn handle_send_result(
             }
             Some(Action::SwUpdateMsg(msg)) => {
                 *s = CONFIG.time.sleep_min_s;
-                println!(
-                    "Updating software version from {} to {}",
-                    GIT_COMMIT_DESCRIBE, msg.version
-                );
                 match update_client(&msg.version) {
                     Err(e) => panic!("Error: {e}"),
                     Ok(_) => {
@@ -812,7 +808,7 @@ fn load_config() -> Config {
     .expect("Failed to load any config file.")
 }
 
-// Update list of packages and then upgrade client to the specified version
+// Update list of packages and then upgrade client to the required version
 fn update_client(version: &str) -> Result<(), std::io::Error> {
     let mut process = std::process::Command::new("opkg")
         .arg("update")
@@ -826,16 +822,74 @@ fn update_client(version: &str) -> Result<(), std::io::Error> {
         }
     };
 
-    let package_name = &format!("host-insight-client_{}", version);
-    let mut process = std::process::Command::new("opkg")
-        .arg("install")
-        .arg(package_name)
-        .spawn()
-        .expect("Failed to execute opkg");
+    let current_version_components: Vec<&str> = GIT_COMMIT_DESCRIBE.split('.').collect();
+    let required_version_components: Vec<&str> = version.split('.').collect();
 
-    match process.wait() {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e),
+    let current_major: u32 = current_version_components[0]
+        .replace('v', "")
+        .parse()
+        .unwrap();
+    let required_major: u32 = required_version_components[0]
+        .replace('v', "")
+        .parse()
+        .unwrap();
+
+    let current_package = if current_major < 2 {
+        "host-insight-client"
+    } else {
+        "host-insight-client{current_major}"
+    };
+
+    if current_major < required_major {
+        eprintln!("Removing current client package {current_package}...");
+        process = std::process::Command::new("opkg")
+            .arg("remove")
+            .arg(current_package)
+            .spawn()
+            .expect("Failed to execute opkg");
+
+        process.wait()?;
+
+        let new_package = "host-insight-client{required_major}";
+        let output = std::process::Command::new("opkg")
+            .arg("install")
+            .arg(new_package)
+            .output()
+            .expect("Failed to install {new_package}");
+
+        if output.status.success() {
+            eprintln!("Successfully installed {new_package}");
+            Ok(())
+        } else {
+            eprintln!("Failed to install {new_package}.");
+            eprintln!("Reinstalling {current_package}...");
+            let output = std::process::Command::new("opkg")
+                .arg("install")
+                .arg(current_package)
+                .output()
+                .expect("Failed to install {current_package}");
+
+            if output.status.success() {
+                eprintln!("Successfully reinstalled {current_package}");
+                Ok(())
+            } else {
+                eprintln!("Failed to reinstall {new_package}");
+                let no_client_error =
+                    std::io::Error::new(std::io::ErrorKind::Other, "No client installed!");
+                Err(no_client_error)
+            }
+        }
+    } else {
+        process = std::process::Command::new("opkg")
+            .arg("upgrade")
+            .arg(current_package)
+            .spawn()
+            .expect("Failed to execute opkg");
+
+        match process.wait() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 }
 
