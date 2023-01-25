@@ -826,7 +826,7 @@ fn update_client(version: &str) -> Result<(), std::io::Error> {
         }
     };
 
-    let package_name = &format!("host-insight-client-{}", version);
+    let package_name = &format!("host-insight-client_{}", version);
     let mut process = std::process::Command::new("opkg")
         .arg("install")
         .arg(package_name)
@@ -951,7 +951,7 @@ fn get_digital_chip_and_line(internal_port_name: &str) -> Option<(String, u32)> 
     let chip_iterator = match gpio_cdev::chips() {
         Ok(chips) => chips,
         Err(e) => {
-            println!("Failed to get chip iterator: {:?}", e);
+            eprintln!("Failed to get chip iterator: {:?}", e);
             return None;
         }
     };
