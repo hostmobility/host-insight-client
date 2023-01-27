@@ -78,6 +78,7 @@ pub const CONF_DIR: &str = env!("CONF_DIR");
 const SLEEP_OFFSET: f64 = 0.1;
 
 enum ErrorCodes {
+    Enoent = 2, // No such file or directory
     Etime = 62, // Timer expired
 }
 
@@ -498,7 +499,7 @@ async fn remote_control_monitor(channel: Channel) -> Result<(), Box<dyn Error>> 
 
 async fn can_monitor(port: &CanPort) -> Result<(), Box<dyn Error>> {
     let dbc = load_dbc_file(CONFIG.can.as_ref().unwrap().dbc_file.as_ref().unwrap())
-        .expect("Failed to load DBC file");
+        .unwrap_or_else(|_| std::process::exit(ErrorCodes::Enoent as i32));
 
     let mut map = HashMap::new();
     let mut prev_map = HashMap::new();
