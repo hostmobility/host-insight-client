@@ -22,6 +22,10 @@ version = "0.4.7"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
+[lib]
+name = "lib"
+path = "src/lib.rs"
+
 [[bin]]
 name = "host-insight-client"
 path = "src/main.rs"
