@@ -19,9 +19,11 @@
 use can::{can_monitor, can_sender, setup_can};
 use clap::command;
 use futures::future::try_join_all;
+use futures::future::FutureExt;
 use gpio::{digital_in_monitor, remote_control_monitor, set_all_digital_out_to_defaults};
 use lib::{CONFIG, GIT_COMMIT_DESCRIBE};
 use net::{heartbeat, send_initial_values, setup_network};
+use std::error::Error;
 use utils::clean_up;
 
 mod can;
@@ -30,15 +32,11 @@ mod net;
 mod utils;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
     command!().version(GIT_COMMIT_DESCRIBE).get_matches();
 
     println!("Starting HOST Insight Client {}", GIT_COMMIT_DESCRIBE);
     let channel = setup_network().await;
-
-    if CONFIG.can.is_some() {
-        setup_can();
-    }
 
     if CONFIG.digital_out.is_some() {
         set_all_digital_out_to_defaults()?;
@@ -47,72 +45,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send state and any initial Digital IN values
     send_initial_values(channel.clone()).await;
 
-    let heartbeat_future = heartbeat(channel.clone());
-    let remote_control_future = remote_control_monitor(channel.clone());
+    let mut all_futures: Vec<Box<dyn FnOnce() -> Vec<_>>> = vec![];
 
-    // TODO: refactor this ugly part
-    if CONFIG.digital_in.is_some() && CONFIG.can.is_some() {
-        let digital_in_ports = CONFIG.digital_in.clone().unwrap().ports.unwrap();
-        let mut digital_in_monitor_futures =
-            vec![digital_in_monitor(&digital_in_ports[0], channel.clone())];
-        for p in &digital_in_ports[1..] {
-            digital_in_monitor_futures.push(digital_in_monitor(p, channel.clone()));
-        }
+    if let Some(can_config) = &CONFIG.can {
+        if let Some(ports) = &can_config.ports {
+            setup_can(ports);
 
-        let can_ports = CONFIG.can.clone().unwrap().ports.unwrap();
-        let mut can_monitor_futures = vec![can_monitor(&can_ports[0])];
-        for p in &can_ports[1..] {
-            can_monitor_futures.push(can_monitor(p));
-        }
-        let sender_handle = can_sender(channel);
-        match tokio::try_join!(
-            try_join_all(digital_in_monitor_futures),
-            try_join_all(can_monitor_futures),
-            remote_control_future,
-            heartbeat_future,
-            sender_handle,
-        ) {
-            Ok(_) => eprintln!("All tasks completed successfully"),
-            Err(e) => eprintln!("Some task failed: {e}"),
-        };
-    } else if CONFIG.can.is_some() {
-        let sender_handle = can_sender(channel);
-        let can_ports = CONFIG.can.clone().unwrap().ports.unwrap();
-        let mut can_monitor_futures = vec![can_monitor(&can_ports[0])];
-        for p in &can_ports[1..] {
-            can_monitor_futures.push(can_monitor(p));
-        }
-        match tokio::try_join!(
-            try_join_all(can_monitor_futures),
-            remote_control_future,
-            heartbeat_future,
-            sender_handle,
-        ) {
-            Ok(_) => eprintln!("All tasks completed successfully"),
-            Err(e) => eprintln!("Some task failed: {e}"),
-        };
-    } else if CONFIG.digital_in.is_some() {
-        let digital_in_ports = CONFIG.digital_in.clone().unwrap().ports.unwrap();
-        let mut digital_in_monitor_futures =
-            vec![digital_in_monitor(&digital_in_ports[0], channel.clone())];
-        for p in &digital_in_ports[1..] {
-            digital_in_monitor_futures.push(digital_in_monitor(p, channel.clone()));
-        }
+            let can_monitor_futures: Vec<_> = ports
+                .iter()
+                .map(can_monitor)
+                .map(|future| future.boxed())
+                .collect();
+            all_futures.push(Box::new(|| can_monitor_futures));
 
-        match tokio::try_join!(
-            try_join_all(digital_in_monitor_futures),
-            heartbeat_future,
-            remote_control_future,
-        ) {
-            Ok(_) => eprintln!("All tasks completed successfully"),
-            Err(e) => eprintln!("Some task failed: {e}"),
-        };
-    } else {
-        match tokio::try_join!(heartbeat_future, remote_control_future) {
-            Ok(_) => eprintln!("All tasks completed successfully"),
-            Err(e) => eprintln!("Some task failed: {e}"),
-        };
+            let can_sender_futures: Vec<_> = vec![can_sender(channel.clone()).boxed()];
+            all_futures.push(Box::new(|| can_sender_futures));
+        }
     }
+
+    if let Some(digital_in_config) = &CONFIG.digital_in {
+        if let Some(ports) = &digital_in_config.ports {
+            let digital_in_monitor_futures: Vec<_> = ports
+                .iter()
+                .map(|port| digital_in_monitor(port, channel.clone()))
+                .map(|future| future.boxed())
+                .collect();
+            all_futures.push(Box::new(|| digital_in_monitor_futures));
+        }
+        let remote_control_futures: Vec<_> = vec![remote_control_monitor(channel.clone()).boxed()];
+        all_futures.push(Box::new(|| remote_control_futures));
+    }
+
+    // Always add heartbeat
+    let remote_control_futures: Vec<_> = vec![heartbeat(channel.clone()).boxed()];
+    all_futures.push(Box::new(|| remote_control_futures));
+
+    let flattened_futures: Vec<_> = all_futures.into_iter().flat_map(|f| f()).collect();
+
+    match try_join_all(flattened_futures).await {
+        Ok(_) => eprintln!("All tasks completed successfully"),
+        Err(e) => eprintln!("Some task failed: {e}"),
+    };
 
     clean_up();
     Ok(())

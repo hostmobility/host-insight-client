@@ -63,7 +63,7 @@ fn is_can_signal_duplicate(
     false
 }
 
-pub async fn can_sender(channel: Channel) -> Result<i32, Box<dyn Error>> {
+pub async fn can_sender(channel: Channel) -> Result<(), Box<dyn Error>> {
     const MAX_MSG_TO_SEND: usize = 100;
 
     loop {
@@ -188,20 +188,24 @@ pub async fn can_monitor(port: &CanPort) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn setup_can() {
-    for p in CONFIG.can.clone().unwrap().ports.unwrap() {
-        let interface = p.name;
+pub fn setup_can(ports: &Vec<CanPort>) {
+    let default_bitrate = "500000";
+    let default_listen_only_state = "on";
 
-        let mut bitrate = "500000".to_string();
-        if p.bitrate.is_some() {
-            bitrate = p.bitrate.unwrap().to_string();
-        }
+    for p in ports {
+        let interface = &p.name;
+
+        let bitrate = if let Some(b) = p.bitrate {
+            b.to_string()
+        } else {
+            default_bitrate.to_string()
+        };
 
         // ip link set INTERFACE down
         let mut process = std::process::Command::new("ip")
             .arg("link")
             .arg("set")
-            .arg(&interface)
+            .arg(interface)
             .arg("down")
             .spawn()
             .expect("Failed to run ip command.");
@@ -211,19 +215,21 @@ pub fn setup_can() {
         }
 
         // ip link set up INTERFACE type can bitrate BITRATE listen-only {ON/OFF}
-        let mut listen_only_state = "on";
-        if p.listen_only.is_some() && !p.listen_only.unwrap() {
-            listen_only_state = "off";
-        }
+        let listen_only_state = match p.listen_only {
+            Some(true) => "on",
+            Some(false) => "off",
+            None => default_listen_only_state,
+        };
+
         let mut process = std::process::Command::new("ip")
             .arg("link")
             .arg("set")
             .arg("up")
-            .arg(&interface)
+            .arg(interface)
             .arg("type")
             .arg("can")
             .arg("bitrate")
-            .arg(&bitrate)
+            .arg(bitrate)
             .arg("listen-only")
             .arg(listen_only_state)
             .spawn()
@@ -443,7 +449,7 @@ fn get_signal_value(frame_value: u64, start_bit: u64, signal_size: u64) -> u64 {
     }
 
     let bit_mask: u64 = 2u64.pow(signal_size as u32) - 1;
-    ((frame_value >> start_bit) & bit_mask) as u64
+    (frame_value >> start_bit) & bit_mask
 }
 
 #[allow(dead_code)]
