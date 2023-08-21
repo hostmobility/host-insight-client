@@ -19,8 +19,12 @@
 # Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 
 etime=62
+swupdate=100
 
 if [ "$EXIT_STATUS" = "$etime" ]; then
   logger "host-insight-client timed out. Rebooting system"
   systemctl reboot
+elif [ "$EXIT_STATUS" = "$swupdate" ]; then
+  logger "Upgrading the host-insight client"
+  /opt/host-insight-helper/host-insight-helper.sh &
 fi

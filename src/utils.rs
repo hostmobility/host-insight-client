@@ -17,8 +17,13 @@
 // Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 
 use super::gpio::set_all_digital_out_to_defaults;
+use anyhow::Error;
 use lib::{CONFIG, CONF_DIR, GIT_COMMIT_DESCRIBE};
+use std::fs;
+use std::path::Path;
 use std::process::Command;
+
+static CLIENT_UPGRADE_PATH: &str = "/tmp/host-insight/client_upgrade";
 
 pub fn fetch_resource(url: &str, dst: Option<String>) -> Result<(), std::io::Error> {
     if dst.is_some() {
@@ -44,19 +49,7 @@ pub fn fetch_resource(url: &str, dst: Option<String>) -> Result<(), std::io::Err
     Ok(())
 }
 
-pub fn update_client(version: &str) -> Result<(), std::io::Error> {
-    let mut process = Command::new("opkg")
-        .arg("update")
-        .spawn()
-        .expect("Failed to execute opkg");
-
-    match process.wait() {
-        Ok(_) => {}
-        Err(e) => {
-            return Err(e);
-        }
-    };
-
+pub fn update_client(version: &str) -> Result<(), Error> {
     let current_version_components: Vec<&str> = GIT_COMMIT_DESCRIBE.split('.').collect();
     let required_version_components: Vec<&str> = version.split('.').collect();
 
@@ -69,62 +62,17 @@ pub fn update_client(version: &str) -> Result<(), std::io::Error> {
         .parse()
         .unwrap();
 
-    let current_package = if current_major < 2 {
-        "host-insight-client"
-    } else {
-        "host-insight-client{current_major}"
-    };
-
     if current_major < required_major {
-        eprintln!("Removing current client package {current_package}...");
-        process = Command::new("opkg")
-            .arg("remove")
-            .arg(current_package)
-            .spawn()
-            .expect("Failed to execute opkg");
-
-        process.wait()?;
-
-        let new_package = "host-insight-client{required_major}";
-        let output = Command::new("opkg")
-            .arg("install")
-            .arg(new_package)
-            .output()
-            .expect("Failed to install {new_package}");
-
-        if output.status.success() {
-            eprintln!("Successfully installed {new_package}");
-            Ok(())
-        } else {
-            eprintln!("Failed to install {new_package}.");
-            eprintln!("Reinstalling {current_package}...");
-            let output = Command::new("opkg")
-                .arg("install")
-                .arg(current_package)
-                .output()
-                .expect("Failed to install {current_package}");
-
-            if output.status.success() {
-                eprintln!("Successfully reinstalled {current_package}");
-                Ok(())
-            } else {
-                eprintln!("Failed to reinstall {new_package}");
-                let no_client_error =
-                    std::io::Error::new(std::io::ErrorKind::Other, "No client installed!");
-                Err(no_client_error)
-            }
+        // Write the requested upgrade to file for use by Host Insight helper
+        if let Some(parent_dir) = Path::new(CLIENT_UPGRADE_PATH).parent() {
+            fs::create_dir_all(parent_dir)?;
         }
+        fs::write(CLIENT_UPGRADE_PATH, format!("{}", required_major))?;
+        Ok(())
     } else {
-        process = Command::new("opkg")
-            .arg("upgrade")
-            .arg(current_package)
-            .spawn()
-            .expect("Failed to execute opkg");
-
-        match process.wait() {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e),
-        }
+        Err(Error::msg(
+            "Required major version is not greater than the current major version.",
+        ))
     }
 }
 

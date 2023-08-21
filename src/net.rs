@@ -23,7 +23,7 @@ use super::utils::{clean_up, fetch_resource, get_md5sum, update_client};
 use async_std::task;
 use lib::{
     host_insight::{agent_client::AgentClient, reply::Action, Reply, State},
-    ErrorCodes, Identity, CONFIG, CONF_DIR, GIT_COMMIT_DESCRIBE, IDENTITY,
+    ExitCodes, Identity, CONFIG, CONF_DIR, GIT_COMMIT_DESCRIBE, IDENTITY,
 };
 use rand::Rng;
 use std::collections::HashMap;
@@ -207,10 +207,10 @@ pub async fn handle_send_result(
             Some(Action::SwUpdateMsg(msg)) => {
                 *s = CONFIG.time.sleep_min_s;
                 match update_client(&msg.version) {
-                    Err(e) => panic!("Error: {e}"),
+                    Err(e) => eprintln!("{}: Failed to trigger software update.", e),
                     Ok(_) => {
                         clean_up();
-                        std::process::exit(0);
+                        std::process::exit(ExitCodes::SwUpdate as i32);
                     }
                 };
             }
@@ -233,7 +233,7 @@ pub async fn handle_send_result(
             if *s > CONFIG.time.sleep_max_s {
                 eprintln!("Max sleep time reached");
                 // Exit with code to let e.g. a systemd service handle this situation.
-                std::process::exit(ErrorCodes::Etime as i32);
+                std::process::exit(ExitCodes::Etime as i32);
             };
 
             // Double the sleep time to create a back-off effect.

@@ -37,9 +37,9 @@ Host requirements:
 - curl
 - glibc v2.28 or later
 - OpenSSL
-- opkg
 - md5sum
 - systemd
+- [host-insight-helper](https://github.com/hostmobility/meta-mobility-poky-distro/tree/master/recipes-support/host-insight-helper)
 
 ## CAN
 

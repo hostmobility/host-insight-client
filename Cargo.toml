@@ -31,6 +31,7 @@ name = "host-insight-client"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1.0.75"
 async-lock = "2.6.0"
 clap = { version = "3.2.23", features = ["cargo"] }
 tonic = { version = "0.8.2", features = ["tls"] }

@@ -23,7 +23,7 @@ use futures::{stream, stream::StreamExt};
 use lazy_static::lazy_static;
 use lib::{
     host_insight::{agent_client::AgentClient, can_signal, CanMessage, CanSignal},
-    CanPort, ErrorCodes, CONFIG, CONF_DIR,
+    CanPort, ExitCodes, CONFIG, CONF_DIR,
 };
 use std::collections::HashMap;
 use std::error::Error;
@@ -92,7 +92,7 @@ pub async fn can_sender(channel: Channel) -> Result<(), Box<dyn Error>> {
 
 pub async fn can_monitor(port: &CanPort) -> Result<(), Box<dyn Error>> {
     let dbc = load_dbc_file(CONFIG.can.as_ref().unwrap().dbc_file.as_ref().unwrap())
-        .unwrap_or_else(|_| std::process::exit(ErrorCodes::Enoent as i32));
+        .unwrap_or_else(|_| std::process::exit(ExitCodes::Enoent as i32));
 
     let mut map = HashMap::new();
     let mut prev_map = HashMap::new();

@@ -21,9 +21,10 @@ use serde_derive::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-pub enum ErrorCodes {
-    Enoent = 2, // No such file or directory
-    Etime = 62, // Timer expired
+pub enum ExitCodes {
+    Enoent = 2,     // No such file or directory
+    Etime = 62,     // Timer expired
+    SwUpdate = 100, // Software upgrade
 }
 
 pub mod host_insight {
