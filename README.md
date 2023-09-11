@@ -59,14 +59,14 @@ Each digital port is given both an internal and an external name. The
 former is used for finding an existing port on the device and the
 latter for communicating a function to the server.
 
-Each external ports should declare its default state which is
+Each external port should declare its default state which is
 automatically set at startup and shutdown. During a remote control
 session, setting the port as Active means that its non-default state
 is set.
 
 ## Example identity
 
-A unique identity and target URL is expected in identity.toml or
+A unique identity and target URL are expected in identity.toml or
 identity-fallback.toml (in that order) under
 /etc/opt/host-insight-client/.
 
@@ -80,18 +80,19 @@ domain = "example.hostmobility.com"
 The application will look for and use conf-new.toml, conf.toml or
 conf-fallback.toml (in that order) in /etc/opt/host-insight-client/.
 
-Example configuration that enables three digital-in and two CAN ports:
+Example configuration that enables three Digital In, three Digital Out
+and two CAN ports:
 
 ```
 [digital_in]
 ports = [ { internal_name = "digital-in-0", external_name = "Door" },
           { internal_name = "digital-in-1", external_name = "Light" },
-          { internal_name = "digital-in-2", external_name = "Finger protection" }]
+          { internal_name = "digital-in-2", external_name = "Finger protection" } ]
 
 [digital_out]
 ports = [ { internal_name = "digital-out-source-0", external_name = "Reset", default_state = 0 },
           { internal_name = "digital-out-source-1", external_name = "Up", default_state = 0 },
-          { internal_name = "digital-out-source-2", external_name = "Down, default_state = 0 }]
+          { internal_name = "digital-out-source-2", external_name = "Down", default_state = 0 } ]
 
 [can]
 ports = [ { name = "can0", bitrate = 125000, listen_only = true  },
