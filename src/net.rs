@@ -232,9 +232,14 @@ pub async fn handle_send_result(
 
             if *s > CONFIG.time.sleep_max_s {
                 eprintln!("Max sleep time reached");
-                // Exit with code to let e.g. a systemd service handle this situation.
-                std::process::exit(ExitCodes::Etime as i32);
-            };
+
+                // Database issues, such as unassigned instance ID, should not trigger an exit
+                let error_message = format!("{:?}", e);
+                if !error_message.contains("DB") {
+                    // Exit with code to let e.g. a systemd service handle this situation.
+                    std::process::exit(ExitCodes::Etime as i32);
+                }
+            }
 
             // Double the sleep time to create a back-off effect.
             *s *= 2;
