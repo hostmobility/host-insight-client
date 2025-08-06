@@ -223,8 +223,9 @@ pub async fn handle_send_result(
             // situation where all clients retry at the same time.
             // Make sure not to sleep any longer than max.
             let sleep = std::cmp::min(
-                rand::thread_rng()
-                    .gen_range(*s * (1.0 - SLEEP_OFFSET) as u64..=*s * (1.0 + SLEEP_OFFSET) as u64),
+                rand::rng().random_range(
+                    *s * (1.0 - SLEEP_OFFSET) as u64..=*s * (1.0 + SLEEP_OFFSET) as u64,
+                ),
                 CONFIG.time.sleep_max_s,
             );
             eprintln!("Sleeping for {sleep} s");
