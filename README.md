@@ -28,7 +28,7 @@ The following responses can be handled:
 
 Build requirements:
 
-- Rust v1.59.0 or later
+- Rust v1.75 or later
 - Protobuf compiler
 
 Host requirements:
