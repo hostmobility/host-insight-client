@@ -19,21 +19,23 @@
 use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Include the output of git describe --tags --long --dirty
+    // Include the output of git describe --tags --dirty
     let git_describe_output = Command::new("git")
         .args(["describe", "--tags", "--dirty"])
-        .output()
-        .unwrap();
-    let git_version = String::from_utf8(git_describe_output.stdout).unwrap();
+        .output()?
+        .stdout;
+
+    let git_version = String::from_utf8(git_describe_output)?.trim().to_string();
+
     println!("cargo:rustc-env=GIT_VERSION={}", git_version);
-    let bin_dir = "/opt/host-insight-client";
-    println!("cargo:rustc-env=BIN_DIR={}", bin_dir);
-    let conf_dir = "/etc/opt/host-insight-client";
-    println!("cargo:rustc-env=CONF_DIR={}", conf_dir);
+    println!("cargo:rustc-env=BIN_DIR=/opt/host-insight-client");
+    println!("cargo:rustc-env=CONF_DIR=/etc/opt/host-insight-client");
+
     // Build proto
     let mut config = prost_build::Config::new();
     config.protoc_arg("--experimental_allow_proto3_optional");
-    tonic_build::configure().compile_with_config(
+
+    tonic_build::configure().compile_protos_with_config(
         config,
         &[
             "proto/host_insight.proto",
