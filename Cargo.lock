@@ -694,7 +694,7 @@ checksum = "d6a22814455d41612f41161581c2883c0c6a1c41852729b17d5ed88f01e153aa"
 
 [[package]]
 name = "host-insight-client"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-lock",
